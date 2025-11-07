@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
-source("plsrquad2.R")
+source("FQLGR.R")
 ```
 
 
@@ -31,7 +31,8 @@ cat("proporcion clase positiva: ", sum(X_data$CTRCD)/length(X_data$CTRCD), "\n")
 Y <- X_data$CTRCD
 X_data <- X_data[ , setdiff(names(X_data), "CTRCD")]
 ```
-## Transformo en functional data objects 
+## Transformo en functional data objects:
+intento hacer oversampling con SMOTE para entrenar con datos equilibrados y despues uso una base BSPLINE con 50 elementos para smoothear
 ```{r}
 library(caret)
 library(DMwR)  # para SMOTE
@@ -190,9 +191,10 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_noPCA <- Upsilon_naive(fd_centered = fd_train_centered,y = as.numeric(as.character(y_train)), beta = beta_init, gamma = gamma_init, alpha = alpha_init, step_gradient = 1e-6, iterations = 10000, basis = estimationBasis,  LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)), lambda_lin = 0, lambda_quad = 0)
+res_noPCA <- Upsilon_naive(fd_centered = fd_train_centered,y = as.numeric(as.character(y_train)), beta = beta_init, gamma = gamma_init, alpha = alpha_init, step_gradient = 1e-2, iterations = 10000, basis = estimationBasis,  LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)), lambda_lin = 0, lambda_quad = 0)
 ```
-
+# Evaluo
+## Creo graficos AUCROC/PR, Betas y Gammas estimadas para cada modelo y guardo graficos en plots_cardiotox
 
 ```{r}
 library(PRROC)

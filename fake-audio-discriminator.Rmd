@@ -7,8 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
-source("tesis-FPCAconFData.R")
-source("FDLogRegQuadGDEscabias.R")
+source("FQLGR.R")
+
 ```
 
 # Librerías y Configuración Inicial

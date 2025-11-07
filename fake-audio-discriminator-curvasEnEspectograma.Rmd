@@ -7,8 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
-source("tesis-FPCAconFData.R")
-source("FDLogRegQuadGDEscabias.R")
+source("FQLGR.R")
 ```
 
 # Librerías y Configuración Inicial
@@ -30,11 +29,11 @@ LINK de dataset: https://www.kaggle.com/datasets/mohammedabdeldayem/the-fake-or-
 
 Los datos tomados para este modelo son audios cortos de longitud variable (2 a 10 segs aprox) de fragmentos de audios reales (cortados aparentemente de manera aleatoria) sin balancear por géneros y una misma cantidad de adios falsos generados con modelos de deepfake; "The dataset aggregates data from the latest TTS solutions (such as Deep Voice 3 and Google Wavenet TTS) as well as a variety of real human speech, including the Arctic Dataset (http://festvox.org/cmu_arctic/), LJSpeech Dataset (https://keithito.com/LJ-Speech-Dataset/), VoxForge Dataset (http://www.voxforge.org) and our own speech recordings."
 
-Voy a tomar los audios .mp3 y los transformo en sus correspondientes log-periodogramas.
-Luego, voy a transformar a los log-periodogramas en functional data objects con la base de fouerier. 
+Como tardaba muchisimo procesar el dataset con los audios, tuve que preprocesar con la frecuencia fundamental o F0 (una estimación de la frecuencia más baja de todas en la serie armonica) donde traté de mantener una base bastante densa y con mucha información
 
-
-La mayor crítica que podría hacer es que esto es masomenos como realizar la transformada de fourier para tomar el periodograma y luego vuelvo a hacer una especie de transformación de fourier cuando transformo en un functional data object en la base de fourier, por lo que la interpretación del espacio puede ser poco intuitiva
+La idea de usar la F0 la saqué de Functional Data Analysis for Phonetic Research
+Gubian, M.
+2011, Article in monograph or in proceedings (Workshop on New Tools and Methods for Very-LargeScale Phonetics Research (VLSP 2011), pp. DVD). Medio que la intuición es que la F0 fakes deben ser más abruptas y/o escalonadas
 
 ```{r}
 # --- Paquetes necesarios ---
@@ -343,38 +342,6 @@ prop.table(table(df_F0_testing_completo$clase))
 
 
 # ENTRENAMIENTO
-Voy a entrenar los modelos FPCA, sin PCA, FPLRS-lineal y FPLRS-cuadratico usando parametros que encontre medio ojimetro.
-
-## grid search
-
-```{r}
-
-beta_init <- rnorm(nbasis, sd = 0.1)
-gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
-alpha_init <- 0
-
-res_cv_pca <- grid_search_lambda_gradient_descent_penalized_PCA(fd_centered = fd_train_centered, y = Y_train, beta_init = beta_init, gamma_init = gamma_init, alpha_init = alpha_init,
-                               basis = fd_train_centered$basis, LdPenalization = harmacclLfd, step_gradient = 0.01, iterations = 500,
-  lambda_lin_values = c(0,10^seq(-7, 2, length.out = 10)),
-  lambda_quad_values = c(0,10^seq(-7, 2, length.out = 10)), 
-                               folds = 2, seq_var_threshold = c(0.7,0.8,0.85,0.99), seed = 123, batch_size = 31)
-
-res_cv_noPCA <- grid_search_lambda_gradient_descent_penalized_noPCA(
-  fd_centered = fd_train_centered, y = Y_train, 
-  beta_init = beta_init, gamma_init = gamma_init, alpha_init = alpha_init,
-                               basis = fd_train_centered$basis, LdPenalization = harmacclLfd,
-                               step_gradient = 0.01, iterations = 500, 
-   lambda_lin_values = c(0,10^seq(-7, 2, length.out = 10)),
-  lambda_quad_values = c(0,10^seq(-7, 2, length.out = 10)), 
-                               folds = 2, seed = 123 , batch_size = 31)
-
-res_cv_plsr <- cv_grid_search_lambda_nt_kfold( fd_data_centered = fd_train_centered, y = Y_train,
-                               basis = fd_train_centered$basis, LdPenalization = harmacclLfd, step_gradient = 0.01, iterations = 500,
-  lambda_lin_values = c(0,10^seq(-7, 2, length.out = 10)),
-  lambda_quad_values = c(0,10^seq(-7, 2, length.out = 10)), 
-                               k_folds = 2, seed = 123 , batch_size = 31)
-```
-
 
 ```{r, results='hide'}
 
