@@ -15,22 +15,20 @@ Cada documento **RMarkdown** genera los gráficos correspondientes y los guarda 
 
 Los modelos estimados están basados en la siguiente formulación general:
 
-$$
-\eta_i = \alpha + \boldsymbol{\xi}_i^{(i)} \Upsilon_\beta^{(i)} 
-+ Q(\boldsymbol{\xi}_i^{(i)}) \Upsilon_\gamma^{(i)}
-$$
+$$\eta_i = \alpha + \boldsymbol{\xi}_i^{(i)} \Upsilon_\beta^{(i)} 
++ Q(\boldsymbol{\xi}_i^{(i)}) \Upsilon_\gamma^{(i)}$$
 
 donde:
 
-- \( \beta = H_\beta^{(i)}(\Upsilon^{(i)}) \)
-- \( \gamma = H_\gamma^{(i)}(\Upsilon^{(i)}) \)
-- \( \xi^{(i)} = S^{(i)}(X) \) son las proyecciones de las variables originales bajo distintas transformaciones según el modelo.
+- $$ \beta = H_\beta^{(i)}(\Upsilon^{(i)}) $$
+- $$ \gamma = H_\gamma^{(i)}(\Upsilon^{(i)}) $$
+- $$ \xi^{(i)} = S^{(i)}(X) $$ son las proyecciones de las variables originales bajo distintas transformaciones según el modelo.
 
 ---
 
 ## Operador Cuadrático
 
-El operador \( Q(X) \) toma una matriz \( X \) y genera una nueva matriz cuyas columnas corresponden a las multiplicaciones entre todos los pares únicos de columnas de \( X \):
+El operador $$ Q(X) $$ toma una matriz $$ X $$ y genera una nueva matriz cuyas columnas corresponden a las multiplicaciones entre todos los pares únicos de columnas de $$ X $$:
 
 $$
 Q(X) = [\, X_{\cdot,i} \cdot X_{\cdot,j} \,]_{1 \leq i \leq j}
@@ -41,4 +39,4 @@ $$
 ## Optimización
 
 Todos los modelos se resuelven mediante un **algoritmo de descenso por gradiente penalizado por suavidad**,  
-donde las penalizaciones dependen de las transformaciones \( H^{(i)}(X) \) y \( S^{(i)}(X) \) empleadas en cada caso.
+donde las penalizaciones dependen de las transformaciones $$ H^{(i)}(X) $$ y $$ S^{(i)}(X) $$ empleadas en cada caso.
