@@ -15,10 +15,10 @@ Cada documento **RMarkdown** genera los gráficos correspondientes y los guarda 
 
 Los modelos estimados están basados en la siguiente formulación general:
 
-\[
+$$
 \eta_i = \alpha + \boldsymbol{\xi}_i^{(i)} \Upsilon_\beta^{(i)} 
 + Q(\boldsymbol{\xi}_i^{(i)}) \Upsilon_\gamma^{(i)}
-\]
+$$
 
 donde:
 
@@ -32,9 +32,9 @@ donde:
 
 El operador \( Q(X) \) toma una matriz \( X \) y genera una nueva matriz cuyas columnas corresponden a las multiplicaciones entre todos los pares únicos de columnas de \( X \):
 
-\[
+$$
 Q(X) = [\, X_{\cdot,i} \cdot X_{\cdot,j} \,]_{1 \leq i \leq j}
-\]
+$$
 
 ---
 
