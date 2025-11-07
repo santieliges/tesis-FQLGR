@@ -1,0 +1,439 @@
+---
+title: "cardiotox"
+author: "Santiago Eliges"
+date: "2025-08-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+source("plsrquad2.R")
+```
+
+
+
+# Preprocesamiento de datos
+
+## Cargo datos
+```{r}
+library(fda.usc)
+
+X_data <- data.frame(read.csv("BC_cardiotox_functional_variable.csv", sep = ";"))
+
+# Sacar separador de miles en todas las columnas
+X_data[] <- lapply(X_data, function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+cat("proporcion clase positiva: ", sum(X_data$CTRCD)/length(X_data$CTRCD), "\n")
+
+
+Y <- X_data$CTRCD
+X_data <- X_data[ , setdiff(names(X_data), "CTRCD")]
+```
+## Transformo en functional data objects 
+```{r}
+library(caret)
+library(DMwR)  # para SMOTE
+
+# 1) Split estratificado
+set.seed(123)
+entrenamiento <- createDataPartition(Y, p = 0.7, list = FALSE)
+validacion <- setdiff(seq_len(nrow(X_data)), entrenamiento)
+
+# 2) X e Y como data.frame / factor
+X_train <- as.data.frame(lapply(X_data[entrenamiento, ], as.numeric))
+X_valid <- as.data.frame(lapply(X_data[validacion, ], as.numeric))
+
+y_train <- as.factor(Y[entrenamiento])  # SMOTE necesita factor
+y_valid <- as.factor(Y[validacion])
+
+# 3) Oversampling con SMOTE
+train_df <- data.frame(X_train, Class = y_train)
+
+set.seed(123)
+train_bal <- SMOTE(Class ~ ., data = train_df)
+
+X_train <- train_bal[, colnames(X_train)]
+y_train <- as.numeric(as.character(train_bal$Class))
+
+
+
+# 4) Grid de puntos (tantos como columnas en X)
+t <- seq(0, 1, length.out = ncol(X_train))
+
+# 5) Base de Fourier y penalización
+nbasis <- 50
+freq_range <- range(t)
+Lcoef <- c(2)
+harmacclLfd <- vec2Lfd(Lcoef, freq_range)
+estimationBasis <- create.bspline.basis(rangeval = c(-0.005, 1.005), nbasis = nbasis)
+fdPar_obj <- fdPar(estimationBasis, harmacclLfd)
+
+# 6) Suavizado funcional
+fd_train <- smooth.basis(argvals = t, y = t(X_train), fdParobj = fdPar_obj)$fd
+fd_train_mean <- mean.fd(fd_train)
+fd_train_centered <- center.fd(fd_train)
+
+fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdParobj = fdPar_obj)$fd
+fd_valid_centered <- center.fd(fd_valid)
+
+
+```
+
+# Entrenamiento
+
+## entreno el modelo Upsilon0 (en base fpca)
+
+```{r}
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+modelo_fpca <- fpca_Upsilon0(
+    fd_centered=fd_train_centered,
+    y= y_train,
+    beta = beta_init,
+    gamma = gamma_init,
+    alpha  = alpha_init,
+    step_gradient = 0.001,
+    iterations = 15000,
+    var_threshold = 0.9,
+    tol = 1e-8,
+    basis = estimationBasis,
+    LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)),
+    lambda_lin = 1e-4	,
+    lambda_quad = 1e-5)
+
+basis_fpca <- modelo_fpca$fpca_model
+eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
+
+beta_est_pca_quad <- eval_fd_basis %*% modelo_fpca$beta
+
+gamma_est_pca_quad <- eval_fd_basis %*% modelo_fpca$gamma %*% t(eval_fd_basis )
+
+modelo_fpca_lin <- fpca_Upsilon0(
+    fd_centered=fd_train_centered,
+    y= y_train,
+    beta = beta_init,
+    gamma = gamma_init,
+    alpha  = alpha_init,
+    step_gradient = 0.001,
+    iterations = 15000,
+    var_threshold = 0.9,
+    tol = 1e-8,
+    basis = estimationBasis,
+    LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)),
+    lambda_lin = 1e-4	,
+    lambda_quad = 1e-5,
+    modelo_quad = FALSE)
+```
+
+
+## coef_PCA upsilon1
+```{r, results='hide'}
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+res_pca <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = as.numeric(as.character(y_train)), beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 1e-4, iterations = 10000, var_threshold = 0.9, batch_size = 31, LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)), lambda_lin =  1e-3, lambda_quad = 1e-3, tol = 1e-8)
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = as.numeric(as.character(y_train)), beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 1e-3, iterations = 10000, var_threshold = 0.9, batch_size = 31, tol =1e-9, LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)), lambda_lin =  1e-3, lambda_quad = 0 , modelo_quad = FALSE)
+```
+
+## PSLR upsilon2
+
+```{r, results='hide'}
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,y = as.numeric(as.character(y_train)), beta = beta_init,gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 1e-5, iterations = 5000, batch_size = 32, LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)), lambda_lin = 0, lambda_quad = 0, nt = 15, nivel_significancia = 1, scale = TRUE)
+
+res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train_centered, y = as.numeric(as.character(y_train)), beta = beta_init,gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 1e-5, iterations = 5000, batch_size = 32, LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)),modelo_quad = FALSE, lambda_lin = 0, lambda_quad = 0, nt = 15, nivel_significancia = 1, scale = TRUE)
+
+```
+
+## PLSR sobre interacciones cuadraticas Upsilon3
+
+```{r}
+res_plsr_2<- FPLSR_Upsilon3(
+    fd_centered=fd_train_centered,
+    y= as.numeric(as.character(y_train)),
+    alpha  = 0,
+    step_gradient = 3,
+    iterations = 20000,
+    tol = 1e-9,
+    basis = estimationBasis,
+    LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)),
+    lambda_lin = 0,
+    lambda_quad = 0,
+    nt_lin = 15,
+    nt_quad = 80,
+    nivel_significancia_lin = 1, 
+    nivel_significancia_quad = 0.2, 
+    scale = FALSE)
+
+```
+
+
+## modelo Naive
+```{r}
+
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+res_noPCA <- Upsilon_naive(fd_centered = fd_train_centered,y = as.numeric(as.character(y_train)), beta = beta_init, gamma = gamma_init, alpha = alpha_init, step_gradient = 1e-6, iterations = 10000, basis = estimationBasis,  LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)), lambda_lin = 0, lambda_quad = 0)
+```
+
+
+```{r}
+library(PRROC)
+
+# --- Calcular probabilidades de validación ---
+y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_pca_noquad <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid_centered, estimationBasis, modo = "NoPCA")
+y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_noquad <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+
+# --- Calcular curvas PR (Precision-Recall) ---
+# PRROC espera que las etiquetas positivas sean 1 y las negativas 0
+get_pr <- function(y_true, y_scores) {
+  pos <- y_scores[y_true == 1]
+  neg <- y_scores[y_true == 0]
+  pr.curve(scores.class0 = pos, scores.class1 = neg, curve = TRUE)
+}
+
+pr_pca    <- get_pr(y_valid, y_prob_valid_pca)
+pr_pca_noquad <- get_pr(y_valid, y_prob_valid_pca_noquad)
+pr_noPCA  <- get_pr(y_valid, y_prob_valid_NoPCA)
+pr_plsr   <- get_pr(y_valid, y_prob_valid_plsr)
+pr_plsr_2   <- get_pr(y_valid, y_prob_valid_plsr_2)
+pr_plsr_noquad <- get_pr(y_valid, y_prob_valid_plsr_noquad)
+pr_base_fpca <- get_pr(y_valid, y_prob_valid_base_fpca)
+pr_base_fpca_noquad <- get_pr(y_valid, y_prob_valid_base_fpca_noquad)
+
+# --- Extraer AUC-PR ---
+auc_pr_pca    <- pr_pca$auc.integral
+auc_pr_pca_noquad <- pr_pca_noquad$auc.integral
+auc_pr_noPCA  <- pr_noPCA$auc.integral
+auc_pr_plsr   <- pr_plsr$auc.integral
+auc_pr_plsr_2   <- pr_plsr_2$auc.integral
+auc_pr_plsr_noquad <- pr_plsr_noquad$auc.integral
+auc_pr_base_fpca <- pr_base_fpca$auc.integral
+auc_pr_base_fpca_noquad <- pr_base_fpca_noquad$auc.integral
+
+# --- Imprimir AUC-PR ---
+cat("AUC-PR con PCA cuad:        ", round(auc_pr_pca, 4), "\n")
+cat("AUC-PR con PCA lineal:      ", round(auc_pr_pca_noquad, 4), "\n")
+cat("AUC-PR sin PCA:             ", round(auc_pr_noPCA, 4), "\n")
+cat("AUC-PR con PLSR cuad:       ", round(auc_pr_plsr, 4), "\n")
+cat("AUC-PR con PLSR 2:       ", round(auc_pr_plsr_2, 4), "\n")
+cat("AUC-PR con PLSR lineal:     ", round(auc_pr_plsr_noquad, 4), "\n")
+cat("AUC-PR base fpca:           ", round(auc_pr_base_fpca, 4), "\n")
+cat("AUC-PR base fpca lineal:    ", round(auc_pr_base_fpca_noquad, 4), "\n")
+
+#----- abro para la desscarga ----
+# Abrir el dispositivo gráfico
+png("plots_cardiotox/curvas_pr_comparacion_modelos.png", width = 800, height = 600, res = 120)
+
+
+# --- Graficar todas las curvas PR ---
+plot(pr_pca$curve[,1], pr_pca$curve[,2], type = "l", col = "darkgreen", lwd = 2,
+     xlab = "Recall", ylab = "Precision", main = "Curvas PR - Validación",
+     ylim = c(0,1), xlim = c(0,1))
+lines(pr_pca_noquad$curve[,1], pr_pca_noquad$curve[,2], col = "lightgreen", lwd = 2, lty = 3)
+lines(pr_noPCA$curve[,1], pr_noPCA$curve[,2], col = "darkred", lwd = 2)
+lines(pr_plsr$curve[,1], pr_plsr$curve[,2], col = "darkblue", lwd = 2)
+lines(pr_plsr_noquad$curve[,1], pr_plsr_noquad$curve[,2], col = "skyblue", lwd = 2, lty = 2)
+lines(pr_plsr_2$curve[,1], pr_plsr_2$curve[,2], col = "#007999", lwd = 2)
+lines(pr_base_fpca$curve[,1], pr_base_fpca$curve[,2], col = "purple", lwd = 2)
+lines(pr_base_fpca_noquad$curve[,1], pr_base_fpca_noquad$curve[,2], col = "violet", lwd = 2, lty = 2)
+
+legend("bottomright",
+       legend = c(
+         paste0("(naive) (AUC = ", round(auc_pr_noPCA, 4), ")"),
+         paste0("(0) (AUC = ", round(auc_pr_base_fpca, 4), ")"),
+         paste0("(0) lineal (AUC = ", round(auc_pr_base_fpca_noquad, 4), ")"),
+         paste0("(1) (AUC = ", round(auc_pr_pca, 4), ")"),
+         paste0("(1) lineal (AUC = ", round(auc_pr_pca_noquad, 4), ")"),
+         paste0("(2) (AUC = ", round(auc_pr_plsr, 4), ")"),
+         paste0("(2) lineal (AUC = ", round(auc_pr_plsr_noquad, 4), ")"),
+         paste0("(3) (AUC = ", round(auc_pr_plsr_2, 4), ")")
+                ),
+       col = c("darkred","purple", "violet", "darkgreen","lightgreen", "darkblue","skyblue", "#007999"),
+       lwd = 2,
+       lty = c(1, 1, 2, 1 ,2, 1, 2, 1),
+       cex = 0.75,                    # reduce tamaño del texto
+       bty = "n")
+# Cerrar y guardar la imagen
+dev.off()
+```
+
+
+
+```{r}
+library(pROC)
+
+# Probabilidades de validación
+y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_pca_noquad    <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid_centered, estimationBasis, modo = "NoPCA")
+y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_noquad   <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_base_fpca    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+
+roc_pca    <- roc(response = y_valid, predictor = y_prob_valid_pca)
+roc_pca_noquad    <- roc(response = y_valid, predictor = y_prob_valid_pca_noquad)
+roc_noPCA  <- roc(response = y_valid, predictor = y_prob_valid_NoPCA)
+roc_plsr   <- roc(response = y_valid, predictor = y_prob_valid_plsr)
+roc_plsr_2   <- roc(response = y_valid, predictor = y_prob_valid_plsr_2)
+roc_plsr_noquad   <- roc(response = y_valid, predictor = y_prob_valid_plsr_noquad)
+roc_base_fpca  <- roc(response = y_valid, predictor = y_prob_valid_base_fpca)
+roc_base_fpca_noquad    <- roc(response = y_valid, predictor = y_prob_valid_base_fpca_noquad)
+
+auc_pca    <- auc(roc_pca)
+auc_pca_noquad    <- auc(roc_pca_noquad)
+auc_noPCA  <- auc(roc_noPCA)
+auc_plsr   <- auc(roc_plsr)
+auc_plsr_2   <- auc(roc_plsr_2)
+auc_plsr_noquad   <- auc(roc_plsr_noquad)
+auc_base_fpca  <- auc(roc_base_fpca)
+auc_base_fpca_noquad <- auc(roc_base_fpca_noquad)
+
+# Imprimir AUROCs
+cat("AUROC con PCA cuad:        ", round(auc_pca, 4), "\n")
+cat("AUROC con PCA lineal:        ", round(auc_pca_noquad, 4), "\n")
+cat("AUROC sin PCA:        ", round(auc_noPCA, 4), "\n")
+cat("AUROC con PLSR cuad: ", round(auc_plsr, 4), "\n")
+cat("AUROC con PLSR_2: ", round(auc_plsr_2, 4), "\n")
+cat("AUROC con PLSR lineal: ", round(auc_plsr_noquad, 4), "\n")
+cat("AUROC base fpca: ", round(auc_base_fpca, 4), "\n")
+cat("AUROC base fpca lineal: ", round(auc_base_fpca_noquad, 4), "\n")
+
+#----- abro para la desscarga ----
+# Abrir el dispositivo gráfico
+png("plots_cardiotox/curvas_roc_comparacion_modelos.png", width = 800, height = 600, res = 120)
+
+
+plot(roc_pca,    col = "darkgreen", lwd = 2, main = "Curvas ROC - Validacion", legacy.axes = TRUE)
+lines(roc_pca_noquad,    col = "lightgreen", lwd = 2, lty = 3)
+lines(roc_noPCA, col = "darkred",   lwd = 2, lty = 1)
+lines(roc_plsr,  col = "darkblue",      lwd = 2, lty = 1)
+lines(roc_plsr_noquad, col = "skyblue", lwd = 2, lty= 2)
+lines(roc_plsr_2, col = "#007999", lwd = 2, lty = 1)
+lines(roc_base_fpca, col = "purple", lwd = 2, lty = 1)
+lines(roc_base_fpca_noquad, col = "violet", lwd = 2, lty = 2)
+
+legend("bottomright",
+       legend = c(
+         paste0("(naive) (AUC = ", round(auc_noPCA, 4), ")"),
+         paste0("(0) (AUC = ", round(auc_base_fpca, 4), ")"),
+         paste0("(0) lineal (AUC = ", round(auc_base_fpca_noquad, 4), ")"),
+         paste0("(1) (AUC = ", round(auc_pca, 4), ")"),
+         paste0("(1) lineal (AUC = ", round(auc_pca_noquad, 4), ")"),
+         paste0("(2) (AUC = ", round(auc_plsr, 4), ")"),
+         paste0("(2) lineal (AUC = ", round(auc_plsr_noquad, 4), ")"),
+         paste0("(3) (AUC = ", round(auc_plsr_2, 4), ")")
+                ),
+       col = c("darkred","purple", "violet", "darkgreen","lightgreen", "darkblue","skyblue","#007999"),
+       lwd = 2,
+       lty = c(1, 1, 2, 1 ,2, 1, 2, 1),
+       cex = 0.75,                    # reduce tamaño del texto
+       bty = "n")
+
+# Cerrar y guardar la imagen
+dev.off()
+```
+
+```{r}
+
+basis = fd_train_centered$basis
+evalbasis <- eval.basis(t, basis)
+
+basis_fpca <- pca.fd(fdobj = fd_train, nharm = modelo_fpca$K, centerfns = TRUE)
+eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
+
+beta_est_pca_quad <- eval_fd_basis %*% modelo_fpca$beta
+gamma_est_pca_quad <- eval_fd_basis %*% modelo_fpca$gamma %*% t(eval_fd_basis )
+
+betas_list <- list(
+  PCA   = evalbasis %*% res_pca$beta ,
+  PLSR  = evalbasis %*% res_plsr_quad$beta,
+  Naive = evalbasis %*% res_noPCA$beta,
+  FPCA  = beta_est_pca_quad,
+  PLSR_2 = evalbasis %*% res_plsr_2$beta
+) 
+
+gammas_list <- list(
+  PCA   = evalbasis %*% res_pca$gamma %*% t(evalbasis),
+  PLSR  = evalbasis %*% res_plsr_quad$gamma%*% t(evalbasis),
+  Naive = evalbasis %*% res_noPCA$gamma %*% t(evalbasis),      
+  FPCA  = gamma_est_pca_quad,
+  PLSR_2 =  evalbasis %*% res_plsr_2$gamma%*% t(evalbasis)
+
+)
+
+nombres <- names(betas_list)   # toma los nombres de las listas (coherente)
+
+# chequeo rápido de consistencia
+if (!all(names(betas_list) == names(gammas_list))) {
+  stop("Los nombres/orden de betas_list y gammas_list no coinciden.")
+}
+
+# crear carpeta plots si no existe
+if (!dir.exists("plots_cardiotox")) dir.create("plots_cardiotox")
+
+for (nm in nombres) {
+  # extraer objetos por nombre
+  beta_est_obj  <- betas_list[[nm]]
+  gamma_est_obj <- gammas_list[[nm]]
+
+  # construir nombres de archivo con paste0
+  out_beta  <- file.path("plots_cardiotox", paste0("beta_est_", nm, "_gscv.png"))
+  out_cont  <- file.path("plots_cardiotox", paste0("contour_gamma_est_", nm, "_gscv.png"))
+  out_3d    <- file.path("plots_cardiotox", paste0("3dplot_gamma_est_", nm, "_gscv.png"))
+
+  # exportar (ajustá los argumentos según lo que esperan tus funciones)
+  exportar_plot_beta_full(
+    t_grid        = t,
+    beta_est      = beta_est_obj,
+    output_filename = out_beta,
+    title_suffix  = paste0(nm)
+  )
+
+  exportar_gamma_contour_full(
+    t_grid         = t,
+    gamma          = gamma_est_obj,
+    output_filename = out_cont,
+    title_suffix   = paste0(nm)
+  )
+
+  exportar_plot_gamma_3d_full(
+    t_grid         = t,
+    gamma          = gamma_est_obj,
+    output_filename = out_3d,
+    title_suffix   = paste0(nm),
+    palette_name = "Blues"
+  )
+}
+
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

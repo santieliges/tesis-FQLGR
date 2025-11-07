@@ -1,0 +1,923 @@
+---
+title: "FakeAudioDiscriminator"
+author: "Santiago Eliges"
+date: "2025-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+source("tesis-FPCAconFData.R")
+source("FDLogRegQuadGDEscabias.R")
+```
+
+# Librerías y Configuración Inicial
+
+```{r}
+# Instalar paquetes necesarios (si no están instalados)
+if (!require("fda")) install.packages("fda")
+if (!require("MASS")) install.packages("MASS")
+if (!require("pROC")) install.packages("pROC")
+library(pROC)
+library(fda)
+library(MASS)
+library(tuneR)
+library(seewave)
+```
+
+# Pre-proceso de datos
+LINK de dataset: https://www.kaggle.com/datasets/mohammedabdeldayem/the-fake-or-real-dataset
+
+Los datos tomados para este modelo son audios cortos de longitud variable (2 a 10 segs aprox) de fragmentos de audios reales (cortados aparentemente de manera aleatoria) sin balancear por géneros y una misma cantidad de adios falsos generados con modelos de deepfake; "The dataset aggregates data from the latest TTS solutions (such as Deep Voice 3 and Google Wavenet TTS) as well as a variety of real human speech, including the Arctic Dataset (http://festvox.org/cmu_arctic/), LJSpeech Dataset (https://keithito.com/LJ-Speech-Dataset/), VoxForge Dataset (http://www.voxforge.org) and our own speech recordings."
+
+Voy a tomar los audios .mp3 y los transformo en sus correspondientes log-periodogramas.
+Luego, voy a transformar a los log-periodogramas en functional data objects con la base de fouerier. 
+
+
+La mayor crítica que podría hacer es que esto es masomenos como realizar la transformada de fourier para tomar el periodograma y luego vuelvo a hacer una especie de transformación de fourier cuando transformo en un functional data object en la base de fourier, por lo que la interpretación del espacio puede ser poco intuitiva
+
+```{r}
+# --- Paquetes necesarios ---
+library(tuneR)
+library(seewave)
+library(ggplot2)
+library(gridExtra)
+
+# --- Definir rutas ---
+carpeta_training_fake <- 'D:/Tesis/archive/archive/for-norm/for-norm/training/fake'
+carpeta_training_real <- 'D:/Tesis/archive/archive/for-norm/for-norm/training/real'
+
+# --- Definir rutas ---
+carpeta_testing_fake <- 'D:/Tesis/archive/archive/for-norm/for-norm/testing/fake'
+carpeta_testing_real <- 'D:/Tesis/archive/archive/for-norm/for-norm/testing/real'
+
+# --- Listar archivos de audio ---
+archivos_fake <- list.files(carpeta_training_fake,  full.names = TRUE)
+archivos_real <- list.files(carpeta_training_real,  full.names = TRUE)
+archivos_testing_fake <- list.files(carpeta_testing_fake, full.names = TRUE)
+archivos_testing_real <- list.files(carpeta_testing_real, full.names = TRUE)
+# --- Seleccionar ejemplos al azar ---
+set.seed(123)
+muestras_fake <- sample(archivos_fake, 3)
+muestras_real <- sample(archivos_real, 3)
+
+# --- Función para graficar la F0 ---
+graficar_F0 <- function(archivo, clase) {
+  # Leer el audio
+  audio <- readWave(archivo)
+  
+  # Si tiene más de un canal, usar el primero
+  if (audio@stereo) audio <- mono(audio, "left")
+  
+  # Estimar F0 usando fund() de seewave
+  f0 <- fund(audio, fmax =500, f = audio@samp.rate, ovlp = 50, plot = FALSE)  # fmax puede ajustarse según rango de voz
+  print(summary(f0[, 2]))
+  
+
+  # fund() devuelve un vector de frecuencias y un vector de tiempo
+  df <- data.frame(
+    time = f0[,1],    # tiempo
+    F0 = f0[,2]       # frecuencia fundamental
+  )
+  
+  # Gráfico
+  ggplot(df, aes(x = time, y = F0)) +
+    geom_line(color = ifelse(clase == "FAKE", "red", "blue")) +
+    labs(
+      title = paste("Clase:", clase, "\nArchivo:", basename(archivo)),
+      x = "Tiempo (s)", y = "F0 (Hz)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 10),
+      axis.text = element_text(size = 8)
+    )
+}
+
+```
+
+
+
+```{r}
+
+#--------------------------------------------------------------
+# 🔹 Calcular duración promedio de los audios (en segundos)
+#   (mantiene utilidad general, aunque ya no se usa para recortar)
+#--------------------------------------------------------------
+calcular_duracion_media <- function(archivos_wav) {
+  duraciones <- sapply(archivos_wav, function(archivo) {
+    if (!file.exists(archivo)) return(NA)
+    audio <- readWave(archivo)
+    audio_mono <- mono(audio, "left")
+    length(audio_mono@left) / audio_mono@samp.rate
+  })
+  mean(duraciones, na.rm = TRUE)
+}
+
+#--------------------------------------------------------------
+# 🔹 Procesar carpeta de audios: estimar F0 y devolver curvas interpoladas
+#   Sin recortar duración + filtra resultados con NAs
+#--------------------------------------------------------------
+procesar_carpeta_F0_fixed <- function(archivos_wav, n_points = 512, fmax = 500) {
+  lista_F0 <- list()
+  nombres_archivos <- c()
+  errores_fund <- c()
+  
+  for (archivo in archivos_wav) {
+    if (!file.exists(archivo)) print(cat("NO EXISTE EL FUCKING ARCHIVO, " ,archivo))
+    
+    # Leer audio
+    audio <- readWave(archivo)
+    audio_mono <- mono(audio, "left")
+    fs <- audio_mono@samp.rate
+    
+    # Estimar F0
+    f0_est <- tryCatch({
+      fund(audio_mono, fmax = fmax, f = fs, ovlp = 75, plot = FALSE)
+    }, error = function(e) NULL)
+    
+    # Si la estimación falló o devolvió NA, saltar archivo
+    if (is.null(f0_est) || anyNA(f0_est[, 2])) {
+      errores_fund <- c(errores_fund, basename(archivo))
+      next
+    }
+    
+    
+    tiempos <- f0_est[, 1]
+    f0 <- f0_est[, 2]
+    
+    # Filtrar valores NA o negativos del F0
+    mask_valid <- !is.na(f0) & f0 > 0
+    if (sum(mask_valid) < 5) next  # muy pocos puntos válidos → descartar
+    tiempos <- tiempos[mask_valid]
+    f0 <- f0[mask_valid]
+    
+    # Interpolar a n_points puntos uniformemente distribuidos
+    f0_interp <- approx(x = tiempos, y = f0,
+                        xout = seq(min(tiempos), max(tiempos), length.out = n_points))$y
+    
+    # Si todavía quedan NAs (por interpolación irregular), descartar
+    if (anyNA(f0_interp)) next
+    
+    lista_F0[[length(lista_F0) + 1]] <- f0_interp
+    nombres_archivos <- c(nombres_archivos, basename(archivo))
+  }
+  
+  if (length(lista_F0) == 0) {
+    warning("No se pudieron procesar audios válidos en: ", paste0(head(archivos_wav, 3), collapse = ", "), " ...")
+    return(data.frame())
+  }
+  
+  df <- as.data.frame(do.call(rbind, lista_F0))
+  rownames(df) <- nombres_archivos
+  return(df)
+}
+
+#--------------------------------------------------------------
+# 🔹 Ejemplo de uso en dataset de entrenamiento y test
+#--------------------------------------------------------------
+
+archivos_fake <- list.files(carpeta_training_fake,  full.names = TRUE)
+archivos_real <- list.files(carpeta_training_real,  full.names = TRUE)
+
+
+archivos_training <- c(
+  archivos_fake,
+  archivos_real
+)
+
+
+#--------------------------------------------------------------
+# 🔹 Carga o generación de datos preprocesados
+#--------------------------------------------------------------
+
+# Nombre del archivo donde se guardan los dataframes procesados
+archivo_datos <- "F0_dataframes.RData"
+
+if (file.exists(archivo_datos)) {
+  message("chivo RData encontrado. Cargando datos...")
+  load(archivo_datos)
+  
+} else {
+  message("No se encontró el archivo RData. Ejecutando preprocesamiento...")
+
+  #--------------------------------------------------------------
+  # Ejemplo de uso en dataset de entrenamiento y test
+  #--------------------------------------------------------------
+
+  archivos_fake <- list.files(carpeta_training_fake, full.names = TRUE)
+  archivos_real <- list.files(carpeta_training_real, full.names = TRUE)
+
+  archivos_training <- c(archivos_fake, archivos_real)
+
+  # Parámetros
+  n_freqs <- 1024
+
+  # Procesamiento de F0
+  df_F0_training_fake <- procesar_carpeta_F0_fixed(archivos_fake, n_points = n_freqs)
+  df_F0_training_real <- procesar_carpeta_F0_fixed(archivos_real, n_points = n_freqs)
+
+  df_F0_training_fake$clase <- 1
+  df_F0_training_real$clase <- 0
+
+  # Balanceo de clases
+  set.seed(123)
+  n_min <- min(nrow(df_F0_training_fake), nrow(df_F0_training_real))
+  df_F0_training_fake_eq <- df_F0_training_fake[sample(nrow(df_F0_training_fake), n_min), ]
+  df_F0_training_real_eq <- df_F0_training_real[sample(nrow(df_F0_training_real), n_min), ]
+
+  # Combinar ambos conjuntos
+  df_F0_training_completo <- rbind(df_F0_training_fake_eq, df_F0_training_real_eq)
+  rownames(df_F0_training_completo) <- NULL
+
+  #--------------------------------------------------------------
+  #Procesamiento de datos de test
+  #--------------------------------------------------------------
+
+  archivos_testing_fake <- list.files(carpeta_testing_fake, full.names = TRUE)
+  archivos_testing_real <- list.files(carpeta_testing_real, full.names = TRUE)
+  archivos_testing <- c(archivos_testing_fake, archivos_testing_real)
+
+  df_F0_testing_fake <- procesar_carpeta_F0_fixed(archivos_testing_fake, n_points = n_freqs)
+  df_F0_testing_real <- procesar_carpeta_F0_fixed(archivos_testing_real, n_points = n_freqs)
+
+  df_F0_testing_fake$clase <- 1
+  df_F0_testing_real$clase <- 0
+
+  df_F0_testing_completo <- rbind(df_F0_testing_fake, df_F0_testing_real)
+  set.seed(123)
+  df_F0_testing_completo <- df_F0_testing_completo[sample(nrow(df_F0_testing_completo)), ]
+  rownames(df_F0_testing_completo) <- NULL
+
+  #--------------------------------------------------------------
+  # Guardar resultados
+  #--------------------------------------------------------------
+
+  save(df_F0_training_completo,
+       df_F0_testing_completo,
+       file = archivo_datos)
+
+  message("eprocesamiento completado y datos guardados en ", archivo_datos)
+}
+
+#--------------------------------------------------------------
+#  Confirmar carga
+#--------------------------------------------------------------
+
+ls()  # para verificar que df_F0_training_completo y df_F0_testing_completo están en el entorno
+
+  
+```
+
+
+
+
+```{r}
+# Dominio
+t <- 1:1024
+freq_range <- c(1, 1024)
+
+# Parámetros de la base B-spline
+nbasis <- 80
+norder <- 5
+Lcoef <- c(3)
+harmacclLdf <- vec2Lfd(Lcoef, freq_range)
+
+# -----
+# Crear los nudos (breaks) dentro del rango, incluyendo los bordes
+# -----
+n_internal <- nbasis - norder + 2
+breaks <- seq(freq_range[1], freq_range[2], length.out = n_internal)
+
+# Crear la base B-spline
+estimationBasis <- create.bspline.basis(
+  rangeval = freq_range,
+  norder = norder,
+  breaks = breaks
+)
+
+# Definir el objeto de penalización funcional
+fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLdf)
+
+
+# Entrenamiento
+Y_train <- as.numeric(df_F0_training_completo$clase)
+X_train <- df_F0_training_completo %>% select(-clase)
+fd_train <- smooth.basis(argvals = t, y = t(X_train), fdPar_obj)$fd
+fd_train_centered <- center.fd(fd_train)
+
+# Test
+Y_valid <- as.numeric(df_F0_testing_completo$clase)
+X_valid <- df_F0_testing_completo %>% select(-clase)
+fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdPar_obj)$fd
+fd_valid_centered <- center.fd(fd_valid)
+
+```
+
+
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+# Ver cantidad total de filas
+nrow(df_F0_training_completo)
+
+# Ver distribución de la variable 'clase'
+table(df_F0_training_completo$clase)
+
+# Ver proporción de clases
+prop.table(table(df_F0_training_completo$clase))
+
+
+# Ver cantidad total de filas
+nrow(df_F0_testing_completo)
+
+# Ver distribución de la variable 'clase'
+table(df_F0_testing_completo$clase)
+
+# Ver proporción de clases
+prop.table(table(df_F0_testing_completo$clase))
+
+```
+
+
+# ENTRENAMIENTO
+Voy a entrenar los modelos FPCA, sin PCA, FPLRS-lineal y FPLRS-cuadratico usando parametros que encontre medio ojimetro.
+
+## grid search
+
+```{r}
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+res_cv_pca <- grid_search_lambda_gradient_descent_penalized_PCA(fd_centered = fd_train_centered, y = Y_train, beta_init = beta_init, gamma_init = gamma_init, alpha_init = alpha_init,
+                               basis = fd_train_centered$basis, LdPenalization = harmacclLfd, step_gradient = 0.01, iterations = 500,
+  lambda_lin_values = c(0,10^seq(-7, 2, length.out = 10)),
+  lambda_quad_values = c(0,10^seq(-7, 2, length.out = 10)), 
+                               folds = 2, seq_var_threshold = c(0.7,0.8,0.85,0.99), seed = 123, batch_size = 31)
+
+res_cv_noPCA <- grid_search_lambda_gradient_descent_penalized_noPCA(
+  fd_centered = fd_train_centered, y = Y_train, 
+  beta_init = beta_init, gamma_init = gamma_init, alpha_init = alpha_init,
+                               basis = fd_train_centered$basis, LdPenalization = harmacclLfd,
+                               step_gradient = 0.01, iterations = 500, 
+   lambda_lin_values = c(0,10^seq(-7, 2, length.out = 10)),
+  lambda_quad_values = c(0,10^seq(-7, 2, length.out = 10)), 
+                               folds = 2, seed = 123 , batch_size = 31)
+
+res_cv_plsr <- cv_grid_search_lambda_nt_kfold( fd_data_centered = fd_train_centered, y = Y_train,
+                               basis = fd_train_centered$basis, LdPenalization = harmacclLfd, step_gradient = 0.01, iterations = 500,
+  lambda_lin_values = c(0,10^seq(-7, 2, length.out = 10)),
+  lambda_quad_values = c(0,10^seq(-7, 2, length.out = 10)), 
+                               k_folds = 2, seed = 123 , batch_size = 31)
+```
+
+
+```{r, results='hide'}
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+modelo_fpca <- fpca_Upsilon0(
+    fd_centered=fd_train_centered,
+    y= Y_train,
+    beta = beta_init,
+    gamma = gamma_init,
+    alpha  = alpha_init,
+    step_gradient = 0.001,
+    iterations = 15000,
+    var_threshold = 0.8,
+    tol = 1e-10,
+    basis = estimationBasis,
+    LdPenalization = harmacclLdf,
+    lambda_lin = 1e-4	,
+    lambda_quad = 1e-5)
+
+basis_fpca <- modelo_fpca$fpca_model
+eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
+
+beta_est_pca_quad <- eval_fd_basis %*% modelo_fpca$beta
+
+gamma_est_pca_quad <- eval_fd_basis %*% modelo_fpca$gamma %*% t(eval_fd_basis )
+
+modelo_fpca_lin <- fpca_Upsilon0(
+    fd_centered=fd_train_centered,
+    y= Y_train,
+    beta = beta_init,
+    gamma = gamma_init,
+    alpha  = alpha_init,
+    step_gradient = 0.001,
+    iterations = 15000,
+    var_threshold = 0.9,
+    tol = 1e-8,
+    basis = estimationBasis,
+    LdPenalization = harmacclLdf,
+    lambda_lin = 1e-4	,
+    lambda_quad = 1e-5,
+    modelo_quad = FALSE)
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+
+res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,y = Y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.002, iterations = 8000, var_threshold = 0.8, LdPenalization = 2, lambda_lin = 0, lambda_quad = 1e-3, modelo_quad = FALSE)
+
+res_pca <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = Y_train, beta = res_pca_noquad$beta, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 20000, var_threshold = 0.9, LdPenalization = 2, lambda_lin = 0, lambda_quad = 0, tol = 1e-9, scale =  FALSE)
+ 
+
+ 
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,y = Y_train, beta = beta_init,gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 8000, LdPenalization = harmacclLdf, lambda_lin = 0, lambda_quad = 0, nivel_significancia = 1)
+
+
+res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,y = Y_train, beta = beta_init,gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 8000, LdPenalization = harmacclLdf, lambda_lin = 1e-5, lambda_quad = 1e-3, modelo_quad = FALSE, nivel_significancia = 1)
+
+res_plsr_2<- FPLSR_Upsilon3(
+    fd_centered=fd_train_centered,
+    y= Y_train,
+    alpha  = 0,
+    step_gradient = 1e-4,
+    iterations = 10000,
+    tol = 1e-8,
+    basis = estimationBasis,
+    LdPenalization = harmacclLdf,
+    lambda_lin = 1e-3,
+    lambda_quad = 1e-3,
+    nt_lin = 18,
+    nt_quad = 80,
+    nivel_significancia_lin = 0.05, 
+    nivel_significancia_quad = 0.005)
+
+
+beta_init <- rnorm(nbasis, sd = 0.1)
+gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+alpha_init <- 0
+res_nopca <- gradient_descent_noPCA(fd_centered = fd_train_centered, y = Y_train, 
+                                    beta = beta_init,gamma = gamma_init, alpha = alpha_init,
+                                    step_gradient = 0.002, iterations = 10000, basis = estimationBasis,
+                                    LdPenalization = harmacclLdf, lambda_lin = 0, lambda_quad = 0)
+
+```
+
+```{r}
+# crear carpeta plots si no existe
+if (!dir.exists("plots_F0_fakeaudio")) dir.create("plots_F0_fakeaudio")
+```
+
+
+```{r}
+library(PRROC)
+
+# --- Función idéntica: sigue calculando probabilidades ---
+predecir_probabilidades_validacion <- function(res, fd_valid_centered, estimationBasis, modo = c("PCA", "NoPCA", "PLSR")) {
+  modo <- match.arg(modo)
+  psi <- inprod(estimationBasis, estimationBasis)
+
+  A_valid <- t(fd_valid_centered$coefs)
+  A_psi_valid <- A_valid %*% psi
+  
+  beta  <- res$beta
+  gamma <- res$gamma
+  alpha <- res$alpha
+  
+  lin_pred  <- as.vector(A_psi_valid %*% beta)
+  quad_pred <- rowSums((A_psi_valid %*% gamma) * A_psi_valid)
+  y_prob_valid <- 1 / (1 + exp(-(alpha + lin_pred + quad_pred)))
+  
+  return(y_prob_valid)
+}
+
+# --- Calcular probabilidades de validación ---
+y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_pca_noquad <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_nopca, fd_valid_centered, estimationBasis, modo = "NoPCA")
+y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_noquad <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid_centered, modelo_fpca_lin$fpca_model$harmonics)
+
+# --- Calcular curvas PR (Precision-Recall) ---
+# PRROC espera que las etiquetas positivas sean 1 y las negativas 0
+get_pr <- function(y_true, y_scores) {
+  pos <- y_scores[y_true == 1]
+  neg <- y_scores[y_true == 0]
+  pr.curve(scores.class0 = pos, scores.class1 = neg, curve = TRUE)
+}
+
+pr_pca    <- get_pr(Y_valid, y_prob_valid_pca)
+pr_pca_noquad <- get_pr(Y_valid, y_prob_valid_pca_noquad)
+pr_noPCA  <- get_pr(Y_valid, y_prob_valid_NoPCA)
+pr_plsr   <- get_pr(Y_valid, y_prob_valid_plsr)
+pr_plsr_2   <- get_pr(Y_valid, y_prob_valid_plsr_2)
+pr_plsr_noquad <- get_pr(Y_valid, y_prob_valid_plsr_noquad)
+pr_base_fpca <- get_pr(Y_valid, y_prob_valid_base_fpca)
+pr_base_fpca_noquad <- get_pr(Y_valid, y_prob_valid_base_fpca_noquad)
+
+# --- Extraer AUC-PR ---
+auc_pr_pca    <- pr_pca$auc.integral
+auc_pr_pca_noquad <- pr_pca_noquad$auc.integral
+auc_pr_noPCA  <- pr_noPCA$auc.integral
+auc_pr_plsr   <- pr_plsr$auc.integral
+auc_pr_plsr_2   <- pr_plsr_2$auc.integral
+auc_pr_plsr_noquad <- pr_plsr_noquad$auc.integral
+auc_pr_base_fpca <- pr_base_fpca$auc.integral
+auc_pr_base_fpca_noquad <- pr_base_fpca_noquad$auc.integral
+
+# --- Imprimir AUC-PR ---
+cat("AUC-PR con PCA cuad:        ", round(auc_pr_pca, 4), "\n")
+cat("AUC-PR con PCA lineal:      ", round(auc_pr_pca_noquad, 4), "\n")
+cat("AUC-PR sin PCA:             ", round(auc_pr_noPCA, 4), "\n")
+cat("AUC-PR con PLSR cuad:       ", round(auc_pr_plsr, 4), "\n")
+cat("AUC-PR con PLSR 2:       ", round(auc_pr_plsr_2, 4), "\n")
+cat("AUC-PR con PLSR lineal:     ", round(auc_pr_plsr_noquad, 4), "\n")
+cat("AUC-PR base fpca:           ", round(auc_pr_base_fpca, 4), "\n")
+cat("AUC-PR base fpca lineal:    ", round(auc_pr_base_fpca_noquad, 4), "\n")
+
+#----- abro para la desscarga ----
+# Abrir el dispositivo gráfico
+png("plots_F0_fakeaudio/curvas_pr_comparacion_modelos.png", width = 800, height = 600, res = 120)
+
+
+# --- Graficar todas las curvas PR ---
+plot(pr_pca$curve[,1], pr_pca$curve[,2], type = "l", col = "darkgreen", lwd = 2,
+     xlab = "Recall", ylab = "Precision", main = "Curvas PR - Validación",
+     ylim = c(0,1), xlim = c(0,1))
+lines(pr_pca_noquad$curve[,1], pr_pca_noquad$curve[,2], col = "lightgreen", lwd = 2, lty = 3)
+lines(pr_noPCA$curve[,1], pr_noPCA$curve[,2], col = "darkred", lwd = 2)
+lines(pr_plsr$curve[,1], pr_plsr$curve[,2], col = "darkblue", lwd = 2)
+lines(pr_plsr_noquad$curve[,1], pr_plsr_noquad$curve[,2], col = "skyblue", lwd = 2, lty = 2)
+lines(pr_plsr_2$curve[,1], pr_plsr_2$curve[,2], col = "#007999", lwd = 2)
+lines(pr_base_fpca$curve[,1], pr_base_fpca$curve[,2], col = "purple", lwd = 2)
+lines(pr_base_fpca_noquad$curve[,1], pr_base_fpca_noquad$curve[,2], col = "violet", lwd = 2, lty = 2)
+
+legend("bottomright",
+       legend = c(
+         paste0("(naive) (AUC = ", round(auc_pr_noPCA, 4), ")"),
+         paste0("(0) (AUC = ", round(auc_pr_base_fpca, 4), ")"),
+         paste0("(0) lineal (AUC = ", round(auc_pr_base_fpca_noquad, 4), ")"),
+         paste0("(1) (AUC = ", round(auc_pr_pca, 4), ")"),
+         paste0("(1) lineal (AUC = ", round(auc_pr_pca_noquad, 4), ")"),
+         paste0("(2) (AUC = ", round(auc_pr_plsr, 4), ")"),
+         paste0("(2) lineal (AUC = ", round(auc_pr_plsr_noquad, 4), ")"),
+         paste0("(3) (AUC = ", round(auc_pr_plsr_2, 4), ")")
+                ),
+       col = c("darkred","purple", "violet", "darkgreen","lightgreen", "darkblue","skyblue", "#007999"),
+       lwd = 2,
+       lty = c(1, 1, 2, 1 ,2, 1, 2, 1),
+       cex = 0.75,                    # reduce tamaño del texto
+       bty = "n")
+# Cerrar y guardar la imagen
+dev.off()
+```
+
+
+
+```{r}
+predecir_probabilidades_validacion <- function(res, fd_valid_centered, estimationBasis, modo = c("PCA", "NoPCA", "PLSR")) {
+  modo <- match.arg(modo)
+  psi <- inprod(estimationBasis, estimationBasis)
+
+  A_valid <- t(fd_valid_centered$coefs)
+  A_psi_valid <- A_valid %*% psi
+  
+  beta <- res$beta
+  gamma <- res$gamma
+  alpha <- res$alpha
+  
+
+  
+  lin_pred <- as.vector(A_psi_valid %*% beta)
+  quad_pred <- rowSums((A_psi_valid %*% gamma) * A_psi_valid)
+  y_prob_valid <- 1 / (1 + exp(-(alpha + lin_pred + quad_pred)))
+return(y_prob_valid)
+}
+
+
+
+# Probabilidades de validación
+y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_pca_noquad    <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid_centered, estimationBasis, modo = "PCA")
+y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_nopca, fd_valid_centered, estimationBasis, modo = "NoPCA")
+y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_noquad   <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid_centered, estimationBasis, modo = "PLSR")
+y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid_centered, modelo_fpca_lin$fpca_model$harmonics)
+
+
+roc_pca    <- roc(response = Y_valid, predictor = y_prob_valid_pca)
+roc_pca_noquad    <- roc(response = Y_valid, predictor = y_prob_valid_pca_noquad)
+roc_noPCA  <- roc(response = Y_valid, predictor = y_prob_valid_NoPCA)
+roc_plsr   <- roc(response = Y_valid, predictor = y_prob_valid_plsr)
+roc_plsr_2   <- roc(response = Y_valid, predictor = y_prob_valid_plsr_2)
+roc_plsr_noquad   <- roc(response = Y_valid, predictor = y_prob_valid_plsr_noquad)
+roc_base_fpca  <- roc(response = Y_valid, predictor = y_prob_valid_base_fpca)
+roc_base_fpca_noquad    <- roc(response = Y_valid, predictor = y_prob_valid_base_fpca_noquad)
+
+auc_pca    <- auc(roc_pca)
+auc_pca_noquad    <- auc(roc_pca_noquad)
+auc_noPCA  <- auc(roc_noPCA)
+auc_plsr   <- auc(roc_plsr)
+auc_plsr_2   <- auc(roc_plsr_2)
+auc_plsr_noquad   <- auc(roc_plsr_noquad)
+auc_base_fpca  <- auc(roc_base_fpca)
+auc_base_fpca_noquad <- auc(roc_base_fpca_noquad)
+
+# Imprimir AUROCs
+cat("AUROC con PCA cuad:        ", round(auc_pca, 4), "\n")
+cat("AUROC con PCA lineal:        ", round(auc_pca_noquad, 4), "\n")
+cat("AUROC sin PCA:        ", round(auc_noPCA, 4), "\n")
+cat("AUROC con PLSR cuad: ", round(auc_plsr, 4), "\n")
+cat("AUROC con PLSR_2: ", round(auc_plsr_2, 4), "\n")
+cat("AUROC con PLSR lineal: ", round(auc_plsr_noquad, 4), "\n")
+cat("AUROC base fpca: ", round(auc_base_fpca, 4), "\n")
+cat("AUROC base fpca lineal: ", round(auc_base_fpca_noquad, 4), "\n")
+
+#----- abro para la desscarga ----
+# Abrir el dispositivo gráfico
+png("plots_F0_fakeaudio/curvas_roc_comparacion_modelos.png", width = 800, height = 600, res = 120)
+
+
+plot(roc_pca,    col = "darkgreen", lwd = 2, main = "Curvas ROC - Validacion", legacy.axes = TRUE)
+lines(roc_pca_noquad,    col = "lightgreen", lwd = 2, lty = 3)
+lines(roc_noPCA, col = "darkred",   lwd = 2, lty = 1)
+lines(roc_plsr,  col = "darkblue",      lwd = 2, lty = 1)
+lines(roc_plsr_noquad, col = "skyblue", lwd = 2, lty= 2)
+lines(roc_plsr_2, col = "#007999", lwd = 2, lty = 1)
+lines(roc_base_fpca, col = "purple", lwd = 2, lty = 1)
+lines(roc_base_fpca_noquad, col = "violet", lwd = 2, lty = 2)
+
+legend("bottomright",
+       legend = c(
+         paste0("(naive) (AUC = ", round(auc_noPCA, 4), ")"),
+         paste0("(0) (AUC = ", round(auc_base_fpca, 4), ")"),
+         paste0("(0) lineal (AUC = ", round(auc_base_fpca_noquad, 4), ")"),
+         paste0("(1) (AUC = ", round(auc_pca, 4), ")"),
+         paste0("(1) lineal (AUC = ", round(auc_pca_noquad, 4), ")"),
+         paste0("(2) (AUC = ", round(auc_plsr, 4), ")"),
+         paste0("(2) lineal (AUC = ", round(auc_plsr_noquad, 4), ")"),
+         paste0("(3) (AUC = ", round(auc_plsr_2, 4), ")")
+                ),
+       col = c("darkred","purple", "violet", "darkgreen","lightgreen", "darkblue","skyblue","#007999"),
+       lwd = 2,
+       lty = c(1, 1, 2, 1 ,2, 1, 2, 1),
+       cex = 0.75,                    # reduce tamaño del texto
+       bty = "n")
+
+# Cerrar y guardar la imagen
+dev.off()
+```
+
+
+
+
+#Reconstrucción de las funciones parametricas estimadas
+Reconstruyo con las estimaciones a los parametros $\beta(t), \gamma(t,s)$
+
+
+```{r}
+# Asegurate de usar los nombres correctos de tus objetos reales.
+# Aquí asumo que existen:
+# res_pca$beta, res_plsr$beta, res_noPCA$beta, beta_est_fpca, matrix_beta
+# gamma_est_pca, gamma_est_plsr, gamma_est_NOpca, gamma_est_fpca, gamma_true
+
+# Guardar en listas (manteniendo la estructura original: vectores/matrices)
+basis = fd_train_centered$basis
+psi <- inprod(basis,basis)
+evalbasis <- eval.basis(t,basis)
+
+basis_fpca <- pca.fd(fdobj = fd_train_centered, nharm = modelo_fpca$K, centerfns = TRUE) 
+eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
+beta_est_pca_quad <- eval_fd_basis %*% modelo_fpca$beta
+gamma_est_pca_quad <- eval_fd_basis %*% modelo_fpca$gamma %*% t(eval_fd_basis )
+
+
+betas_list <- list(
+  PCA   = evalbasis %*% res_pca$beta ,
+  PLSR  = evalbasis %*% res_plsr_quad$beta,
+  Naive = evalbasis %*% res_nopca$beta,
+  FPCA  = beta_est_pca_quad,
+  PLSR_2 = evalbasis %*% res_plsr_2$beta
+) 
+
+gammas_list <- list(
+  PCA   = evalbasis %*% res_pca$gamma %*% t(evalbasis),
+  PLSR  = evalbasis %*% res_plsr_quad$gamma%*% t(evalbasis),
+  Naive = evalbasis %*% res_nopca$gamma %*% t(evalbasis),      
+  FPCA  = gamma_est_pca_quad,
+  PLSR_2 =  evalbasis %*% res_plsr_2$gamma%*% t(evalbasis)
+
+)
+
+nombres <- names(betas_list)   # toma los nombres de las listas (coherente)
+
+# chequeo rápido de consistencia
+if (!all(names(betas_list) == names(gammas_list))) {
+  stop("Los nombres/orden de betas_list y gammas_list no coinciden.")
+}
+
+# crear carpeta plots si no existe
+if (!dir.exists("plots_F0_fakeaudio")) dir.create("plots_F0_fakeaudio")
+
+for (nm in nombres) {
+  # extraer objetos por nombre
+  beta_est_obj  <- betas_list[[nm]]
+  gamma_est_obj <- gammas_list[[nm]]
+
+  # construir nombres de archivo con paste0
+  out_beta  <- file.path("plots_F0_fakeaudio", paste0("beta_est_", nm, "_gscv.png"))
+  out_cont  <- file.path("plots_F0_fakeaudio", paste0("contour_gamma_est_", nm, "_gscv.png"))
+  out_3d    <- file.path("plots_F0_fakeaudio", paste0("3dplot_gamma_est_", nm, "_gscv.png"))
+
+  # exportar (ajustá los argumentos según lo que esperan tus funciones)
+  exportar_plot_beta_full(
+    t_grid        = t,
+    beta_est      = beta_est_obj,
+    output_filename = out_beta,
+    title_suffix  = paste0(nm)
+  )
+
+  exportar_gamma_contour_full(
+    t_grid         = t,
+    gamma          = gamma_est_obj,
+    output_filename = out_cont,
+    title_suffix   = paste0(nm)
+  )
+
+  exportar_plot_gamma_3d_full(
+    t_grid         = t,
+    gamma          = gamma_est_obj,
+    output_filename = out_3d,
+    title_suffix   = paste0(nm),
+    palette_name = "Blues"
+  )
+}
+
+```
+
+
+## Modelo sin PCA
+```{r}
+estimationBasis = fd_train_centered$basis
+psi <- inprod(estimationBasis,estimationBasis)
+evalbasis <- eval.basis(t,estimationBasis)
+
+
+# Curva de convergencia
+plot(res_noPCA$cost_history, type = "l", lwd = 2, col = "blue",
+     xlab = "Iteraciones", ylab = "Negative Log-Likelihood",
+     main = "Convergencia del descenso por gradiente")
+
+# Comparar coeficientes recuperados vs verdaderos
+plot(fd(coef = res_noPCA$beta,basisobj =  estimationBasis),  col = "blue", pch = 1)
+legend("topright", legend = c("beta(t) Estimado"), col = c("blue"), lty = 1, lwd = 2)
+
+evalbasis <- eval.basis(t,estimationBasis)
+#evalbasis <- eval.fd(t,basis)
+# Visualizar con persp (superficie 3D base)
+gamma_est_NOpca <- evalbasis %*% res_noPCA$gamma %*% t(evalbasis )
+
+
+persp(t, t, gamma_est_NOpca,
+      main = "Superficie Estimada (sin PCA)", theta = 40, phi = 30, expand = 0.8 ,
+      xlab = "s", ylab = "t", zlab = "gamma(s,t)", col = "lightgreen", ticktype = "detailed")
+
+image(t, t, gamma_est_NOpca, main = "Gamma Estimada (sin PCA)", col = heat.colors(20))
+
+
+# Medir accuracy de predicción
+y_pred_final <- predict_log_func(fd_centered = fd_valid_centered, psi, res_noPCA$beta, res_noPCA$gamma, res_noPCA$alpha)
+y_clasif <- ifelse(y_pred_final > 0.5, 1, 0)
+accuracy <- mean(y_valid == y_clasif)
+cat("Accuracy final:", round(accuracy, 3), "\n")
+
+```
+
+## Modelo con PCA
+```{r}
+# Curva de convergencia
+plot(res_pca$cost_history, type = "l", lwd = 2, col = "blue",
+     xlab = "Iteraciones", ylab = "Negative Log-Likelihood",
+     main = "Convergencia del descenso por gradiente")
+
+
+plot(fd(coef = res_pca$beta,basisobj =  estimationBasis),  col = "blue", pch = 1)
+#legend("topright", legend = c("beta(t) Estimado"), col = c("blue"), lty = 1, lwd = 2)
+lines(fd(coef = res_pca_noquad$beta,basisobj =  estimationBasis),  col = "red", pch = 1)
+legend("topright", legend = c("PCA Quad", "PCA no-Quad"), col = c("blue", "red"), lty = 1, lwd = 2)
+
+evalbasis <- eval.basis(t,estimationBasis)
+#evalbasis <- eval.fd(t,basis)
+# Visualizar con persp (superficie 3D base)
+gamma_est_pca <- evalbasis %*% res_pca$gamma %*% t(evalbasis )
+gamma_est_pca_noquad <- evalbasis %*% res_pca_noquad$gamma %*% t(evalbasis )
+
+
+
+par(mfrow = c(1, 2))
+
+persp(t, t, gamma_est_pca,
+      main = "Superficie Estimada (PCA)", theta = 40, phi = 30, expand = 0.8 ,
+      xlab = "s", ylab = "t", zlab = "gamma(s,t)", col = "lightgreen", ticktype = "detailed")
+par(mfrow = c(1, 2))
+image(t, t, gamma_est_pca_noquad, main = "PCA NO quad", col = heat.colors(20))
+image(t, t, gamma_est_pca, main = "Gamma Estimada (PCA)", col = heat.colors(20))
+
+# Medir accuracy de predicción
+y_pred_final <- predict_log_func(fd_centered = fd_valid_centered, psi, res_pca$beta, res_pca$gamma, res_pca$alpha)
+y_clasif <- ifelse(y_pred_final > 0.5, 1, 0)
+accuracy <- mean(y_valid == y_clasif)
+cat("Accuracy final:", round(accuracy, 3), "\n")
+
+```
+
+## Modelo con PLSR
+Parece ser que el término cuadratico no aporta mucho en la regresión!
+```{r}
+# Curva de convergencia
+plot(res_plsr_quad$cost_history, type = "l", lwd = 2, col = "blue",
+     xlab = "Iteraciones", ylab = "Negative Log-Likelihood",
+     main = "Convergencia del descenso por gradiente")
+plot(res_plsr_noquad$cost_history, type = "l", lwd = 2, col = "red",
+     xlab = "Iteraciones", ylab = "Negative Log-Likelihood",
+     main = "Convergencia del descenso por gradiente")
+
+# Comparar coeficientes recuperados vs verdaderos
+plot(fd(coef = res_plsr_quad$beta,basisobj =  estimationBasis), col = "red", lwd = 2)
+lines(fd(coef = res_plsr_noquad$beta,basisobj =  estimationBasis),  col = "blue", pch = 1)
+legend("topright", legend = c("PLSR Quad", "PLSR no-Quad"), col = c("blue", "red"), lty = 1, lwd = 2)
+
+evalbasis <- eval.basis(t,estimationBasis)
+#evalbasis <- eval.fd(t,basis)
+# Visualizar con persp (superficie 3D base)
+gamma_est_plsr_quad <- evalbasis %*% res_plsr_quad$gamma %*% t(evalbasis )
+gamma_est_plsr_noquad <- evalbasis %*% res_plsr_noquad$gamma %*% t(evalbasis )
+
+par(mfrow = c(1, 2))
+
+
+persp(t, t, gamma_est_plsr_quad,
+      main = "PLSR Quad", theta = 40, phi = 30, expand = 0.8 ,
+      xlab = "s", ylab = "t", zlab = "gamma(s,t)", col = "lightgreen",
+      ticktype = "detailed")
+
+par(mfrow = c(1, 2))  # 1 fila, 2 columnas
+
+image(t, t, gamma_est_plsr_noquad, main = "PLSR NO quad", col = heat.colors(20))
+image(t, t, gamma_est_plsr_quad, main = "PLSR Quad", col = heat.colors(20))
+
+
+# Medir accuracy de predicción
+y_pred_final <- predict_log_func(fd_centered = fd_valid_centered, psi, res_plsr_quad$beta, res_plsr_quad$gamma, res_plsr_quad$alpha)
+y_clasif <- ifelse(y_pred_final > 0.5, 1, 0)
+accuracy <- mean(y_valid == y_clasif)
+cat("Accuracy final:", round(accuracy, 3), "\n")
+
+```
+
+Parece ser que el término cuadratico no aporta mucho en la regresión!
+```{r}
+# Curva de convergencia
+plot(res_plsr_2$cost_history, type = "l", lwd = 2, col = "blue",
+     xlab = "Iteraciones", ylab = "Negative Log-Likelihood",
+     main = "Convergencia del descenso por gradiente")
+
+# Comparar coeficientes recuperados vs verdaderos
+plot(fd(coef = res_plsr_2$beta,basisobj =  estimationBasis), col = "red", lwd = 2)
+legend("topright", legend = c("PLSR Quad"), col = c("red"), lty = 1, lwd = 2)
+
+evalbasis <- eval.basis(t,estimationBasis)
+#evalbasis <- eval.fd(t,basis)
+# Visualizar con persp (superficie 3D base)
+gamma_est_plsr_quad <- evalbasis %*% res_plsr_2$gamma %*% t(evalbasis )
+gamma_est_plsr_noquad <- evalbasis %*% res_plsr_noquad$gamma %*% t(evalbasis )
+
+par(mfrow = c(1, 2))
+
+
+persp(t, t, gamma_est_plsr_quad,
+      main = "PLSR Quad", theta = 40, phi = 30, expand = 0.8 ,
+      xlab = "s", ylab = "t", zlab = "gamma(s,t)", col = "lightgreen",
+      ticktype = "detailed")
+
+par(mfrow = c(1, 2))  # 1 fila, 2 columnas
+
+image(t, t, gamma_est_plsr_noquad, main = "PLSR NO quad", col = heat.colors(20))
+image(t, t, gamma_est_plsr_quad, main = "PLSR Quad", col = heat.colors(20))
+
+
+# Medir accuracy de predicción
+y_pred_final <- predict_log_func(fd_centered = fd_valid_centered, psi, res_plsr_2$beta, res_plsr_2$gamma, res_plsr_2$alpha)
+y_clasif <- ifelse(y_pred_final > 0.5, 1, 0)
+accuracy <- mean(y_valid == y_clasif)
+cat("Accuracy final:", round(accuracy, 3), "\n")
+
+```
+
