@@ -8,7 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
 
-source("FQLGR.R")
+source("plsrquad2.R")
 ```
 
 
@@ -277,10 +277,120 @@ calcular_metricas_de_modelodpg <- function(modelo, beta_true){
 }
 ```
 
+# La simu "original"
+## El problema que tuve es que acá estoy tomando de manera aleatoria a las coordenadas \beta y \gamma, entonces cuando cambie el tamaño o la cantidad de knots de la base, cambian las funciones parametricas en casa escenario
+```{r}
 
+#-------------------------------------------------------------
+# Simulación de Datos Funcionales con Base B-Spline
+#-------------------------------------------------------------
+library(fda)
+library(MASS)
+
+set.seed(123)
+n <- 5000
+t <- seq(-1, 1, length.out = 101)
+dt <- t[2] - t[1]
+nbasis <- 15
+basis <- create.bspline.basis(rangeval = c(-1.5, 1.5), nbasis = nbasis)
+
+mean_coef <- rnorm(nbasis, sd = 1:nbasis)
+cov_coef <- diag(rev(1:nbasis))
+coef <- mvrnorm(n, mu = mean_coef, Sigma = cov_coef)
+fd_obj <- fd(coef = t(coef), basisobj = basis)
+
+# Visualización de las curvas simuladas
+plot(fd_obj, main = "Datos Funcionales Simulados", col = rgb(0.2, 0.4, 0.6, 0.3))
+mean_fd <- mean.fd(fd_obj)
+lines(mean_fd, col = "red", lwd = 3)
+
+#-------------------------------------------------------------
+# Preprocesamiento: Centrado de Curvas
+#-------------------------------------------------------------
+fd_centered <- center.fd(fd_obj)
+par(mfrow = c(1, 2))
+plot(fd_obj, main = "Datos Originales", col = "gray")
+lines(mean(fd_obj), col = "red", lwd = 2)
+
+plot(fd_centered, main = "Datos Centrados", col = "gray")
+abline(h = 0, col = "red", lwd = 2)
+
+#-------------------------------------------------------------
+# Generación de Coeficientes Verdaderos (β y γ)
+#-------------------------------------------------------------
+simular_superficie_suave <- function(s_grid, t_grid) {
+  # Malla de puntos
+  grid_s <- rep(s_grid, each = length(t_grid))
+  grid_t <- rep(t_grid, times = length(s_grid))
+  
+  # Gaussiana 2D
+  gauss2d <- function(s, t, mu_s, mu_t, sigma = 0.15) {
+    exp(-((s - mu_s)^2 + (t - mu_t)^2) / (2 * sigma^2))
+  }
+  
+  # Superficie combinada
+  gamma_vals <- (
+    gauss2d(grid_s, grid_t, 0.3, 0.3) +
+    1.2 * gauss2d(grid_s, grid_t, 0.7, 0.5) -
+    0.8 * gauss2d(grid_s, grid_t, 0.5, 0.8)
+  )
+  
+  matriz_gamma <- matrix(gamma_vals, nrow = length(s_grid), ncol = length(t_grid))
+  return(matriz_gamma)
+}
+
+# β(t)
+coef_beta <- rep(0, nbasis)
+coef_beta[2] <- 1
+coef_beta[5] <- -3
+coef_beta[8] <- 0.67
+
+evalbasis <- eval.basis(t, basis)
+matrix_beta <- evalbasis %*% coef_beta
+
+# γ(s,t)
+set.seed(123)
+coef_gamma <- matrix(0, nrow = nbasis, ncol = nbasis)
+for (i in 2:(nbasis - 2)) {
+  for (j in (i + 1):(nbasis - 1)) {
+    randnum <- runif(1, -3, 3)
+    coef_gamma[i, j] <- randnum
+    coef_gamma[j, i] <- randnum
+  }
+}
+diag(coef_gamma) <- 0
+coef_gamma[1, ] <- 0
+coef_gamma[nbasis, ] <- 0
+coef_gamma[, 1] <- 0
+coef_gamma[, nbasis] <- 0
+
+matriz_gamma <- evalbasis %*% coef_gamma %*% t(evalbasis)
+
+#-------------------------------------------------------------
+# Visualización de β(t) y γ(s,t)
+#-------------------------------------------------------------
+plot(t, matrix_beta, type = "l", main = "β(t)", xlab = "t", ylab = "β(t)", lwd = 2, col = "blue")
+
+persp(x = t, y = t, z = matriz_gamma,
+      theta = 40, phi = 30, expand = 0.8,
+      col = "lightblue",
+      xlab = "s", ylab = "t", zlab = "γ(s,t)",
+      ticktype = "detailed",
+      cex.main = 1.1, cex.lab = 0.9, cex.axis = 0.7)
+
+#-------------------------------------------------------------
+#  Producto Interno de la Base
+#-------------------------------------------------------------
+psi <- inprod(basis, basis)
+
+```
+
+# Simulación más densa
+## Los plots que estan en la carpeta de plots actual salen de esta simu!
+## Aca pongo más puntos en la grilla (pasa de 100 a 2000) y una base con más elementos. además defino a las funciones parametricas y luego estimo sus coordenadas en la base, de esta forma es el mismo caso aun que cambie el tamaño de la base)
 ```{r}
 # =====================================================================
-# Simulación de Datos Funcionales Correlacionados
+# Simulación de Datos Funcionales Correlacionados base densa
 # =====================================================================
 
 library(fda)
@@ -396,7 +506,7 @@ hist(y_total)
 
 ```{r}
 
-Lcoef = 3
+Lcoef = 2
 harmacclLdf = vec2Lfd(Lcoef, c(-1, 1))
 
 ```
@@ -414,13 +524,13 @@ modelo_fpca <- fpca_Upsilon0(fd_centered=fd_train,
     beta = beta_init,
     gamma =gamma_init,
     alpha  = 0,
-    step_gradient = 0.006,
+    step_gradient = 0.001,
     iterations = 15000,
-    var_threshold = 0.9,
-    tol = 1e-8,
+    var_threshold = 0.8,
+    tol = 1e-7,
     basis = basis,
     LdPenalization = harmacclLdf,
-    lambda_lin = 1e-4	,
+    lambda_lin = 1e-2	,
     lambda_quad = 1e-4)
 
 basis_fpca <- modelo_fpca$fpca_model
@@ -454,60 +564,6 @@ modelo_fpca_lin <- fpca_Upsilon0(fd_centered=fd_train,
     )
 ```
 
-```{r}
-# t <- seq(-1, 1, length.out = 101)
-# dt <- t[2] - t[1]
-# basis <- create.bspline.basis(rangeval = c(-0.1, 1.1), nbasis = nbasis)
-# 
-# beta_init <- rnorm(nbasis, sd = 0.1)
-# gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
-# alpha_init <- 0
-# 
-# Lcoef = 3
-# harmacclLdf = vec2Lfd(Lcoef, c(-1.5, 1.5))
-# 
-# res <- grid_search_lambda_gradient_descent_penalized_PCA(  fd_centered = fd_train,
-#   y = y_train,
-#   beta = beta_init,
-#   gamma = gamma_init,
-#   alpha = alpha_init,
-#   basis = basis,
-#   LdPenalization = harmacclLdf,
-#   lambda_lin_values = c(0,10^seq(-5, 2, length.out = 7)),
-#   lambda_quad_values = c(0,10^seq(-5, 2, length.out = 7)),#c(0,10^seq(-10, -2, length.out = 10)),
-#   folds = 2,
-#   iterations = 1000,
-#   seq_var_threshold = c(0.7,0.8,0.9,0.99)
-#   )
-# 
-# library(dplyr)
-# 
-# best_result <- res$results_df %>%
-#   filter(!is.na(auc)) %>%
-#   arrange(desc(auc)) %>%
-#   slice(1)
-# 
-# print(best_result)
-# 
-# 
-# # Convertir a log10 para visualización
-# results_df <- res$results_df %>%
-#   mutate(log10_lambda_lin = log10(lambda_lin),
-#          log10_lambda_quad = log10(lambda_quad),
-#          var_threshold = as.factor(var_threshold))  # Para facetear
-# 
-# ggplot(results_df, aes(x = log10_lambda_lin, y = log10_lambda_quad, fill = auc)) +
-#   geom_tile(color = "white") +
-#   facet_wrap(~ var_threshold, labeller = label_bquote(var[threshold] == .(var_threshold))) +
-#   scale_fill_viridis_c(option = "magma", na.value = "gray90") +
-#   labs(title = "AUC para cada combinación de lambda_lin y lambda_quad",
-#        x = "log10(lambda_lin)",
-#        y = "log10(lambda_quad)",
-#        fill = "AUC") +
-#   theme_minimal()
-
-
-```
 
 
 #Modelo PCA coef Upsilon1
@@ -518,8 +574,7 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-Lcoef = 3
-harmacclLdf = vec2Lfd(Lcoef, c(-1, 1))
+
 
 res_pca_quad <- pca_coef_Upsilon1(
     fd_centered=fd_train,
@@ -527,14 +582,14 @@ res_pca_quad <- pca_coef_Upsilon1(
     beta = beta_init,
     gamma =gamma_init,
     alpha  = 0,
-    step_gradient = 0.001,
+    step_gradient = 0.005,
     iterations = 10000,
-    var_threshold = 0.8,
+    var_threshold = 0.75,
     tol = 1e-9,
     basis = basis,
     LdPenalization = harmacclLdf,
-    lambda_lin = 1e-4	,
-    lambda_quad = 0
+    lambda_lin = 1e-3	,
+    lambda_quad = 1e-3
     )
 
 beta_est_fd <- fd(coef = res_pca_quad$beta, basisobj = basis)
@@ -564,43 +619,6 @@ res_pca_noquad <- pca_coef_Upsilon1(
     )
 ```
 
-# hago grid search sobre el modelo plsr con penalización
-
-```{r}
-# 
-# 
-# beta_init <- rnorm(nbasis, sd = 0.1)
-# gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
-# alpha_init <- 0
-# 
-# 
-# res_plsr_grid_search <- cv_grid_search_lambda_nt_kfold(
-#   fd_data_centered = fd_train,
-#   y = y_train,
-#   basis = basis,
-#   LdPenalization = harmacclLdf,
-#   lambda_lin_values = c(0,10^seq(-5, 2, length.out = 7)),
-#   lambda_quad_values = c(0,10^seq(-5, 2, length.out = 7)),#c(0,10^seq(-10, -2, length.out = 10)),
-#   k_folds = 2,
-#   iterations = 1000
-#   )
-# 
-# library(dplyr)
-# 
-# res_plsr_grid_search
-# 
-# res_plsr_grid_search %>%
-#   mutate(nt = factor(nt)) %>%
-#   ggplot(aes(x = log10(lambda_lin), y = log10(lambda_quad), fill = auc)) +
-#   geom_tile() +
-#   facet_wrap(~ nt) +
-#   scale_fill_viridis_c() +
-#   labs(x = "log10(lambda_lin)", y = "log10(lambda_quad)", fill = "AUC ROC") +
-#   theme_minimal()
-# 
-# res_plsr_grid_search[which.max(res_plsr_grid_search$auc), ]
-
-```
 ## PLSR simple Upsilon2
 ```{r}
 
@@ -615,7 +633,7 @@ res_plsr<- PLSR_Upsilon_2(
     tol = 1e-8,
     basis = basis,
     LdPenalization = harmacclLdf,
-    nt =15,
+    nt =25,
     lambda_lin = 1e-8,
     lambda_quad = 1e-8,
     nivel_significancia = 1, 
@@ -652,85 +670,6 @@ res_plsr_noquad<- gradient_descent_penalized_plsr(
 
 ```
 
-```{r}
-# # Definimos los valores de significancia a evaluar
-# niveles_signif_lin <- seq(0.001, 0.05, length.out = 5)
-# niveles_signif_quad <- seq(0.001, 0.05, length.out = 5)
-# 
-# # DataFrame para almacenar los resultados
-# resultados <- data.frame(
-#   nivel_lin = numeric(),
-#   nivel_quad = numeric(),
-#   IMSE_beta = numeric(),
-#   IMSE_gamma = numeric()
-# )
-# 
-# # Bucle sobre combinaciones de niveles
-# for (nl in niveles_signif_lin) {
-#   for (nq in niveles_signif_quad) {
-#     cat("Ejecutando combinación lin =", nl, ", quad =", nq, "\n")
-# 
-#     # Ejecutar modelo
-#     res_plsr_2 <- FPLSR_Upsilon3(
-#       fd_centered = fd_train,
-#       y = y_train,
-#       alpha = 0,
-#       step_gradient = 0.005,
-#       iterations = 10000,
-#       tol = 1e-9,
-#       basis = basis,
-#       LdPenalization = harmacclLdf,
-#       lambda_lin = 0,
-#       lambda_quad = 0,
-#       nt_lin = 5,
-#       nt_quad = 60,
-#       nivel_significancia_lin = nl,
-#       nivel_significancia_quad = nq,
-#       scale = TRUE
-#     )
-# 
-#     # Calcular IMSE para beta
-#     beta_est_fd <- fd(coef = res_plsr_2$beta, basisobj = basis)
-#     imseb_beta <- IMSEB_integral(eval.fd(fdobj = beta_est_fd, evalarg = t),
-#                                  matriz_beta, t)
-# 
-#     # Calcular IMSE para gamma
-#     evalbasis <- eval.basis(t, basis)
-#     gamma_est_matriz <- evalbasis %*% res_plsr_2$gamma %*% t(evalbasis)
-#     imseb_gamma <- IMBSEB(matriz_gamma, gamma_est_matriz, t, t)
-# 
-#     # Guardar resultados
-#     resultados <- rbind(resultados, data.frame(
-#       nivel_lin = nl,
-#       nivel_quad = nq,
-#       IMSE_beta = imseb_beta,
-#       IMSE_gamma = imseb_gamma
-#     ))
-#   }
-# }
-# 
-# # Buscar la combinación óptima (mínima IMSE)
-# mejor_beta <- resultados[which.min(resultados$IMSE_beta), ]
-# mejor_gamma <- resultados[which.min(resultados$IMSE_gamma), ]
-# 
-# cat("\nMejor combinación para IMSE beta:\n")
-# print(mejor_beta)
-# 
-# cat("\nMejor combinación para IMSE gamma:\n")
-# print(mejor_gamma)
-# 
-# # Opcional: visualizar el resultado
-# library(ggplot2)
-# 
-# ggplot(resultados, aes(x = nivel_lin, y = nivel_quad, fill = IMSE_beta)) +
-#   geom_tile() +
-#   scale_fill_viridis_c() +
-#   labs(title = "Superficie IMSE(β)",
-#        x = "Nivel significancia lineal",
-#        y = "Nivel significancia cuadrática") +
-#   theme_minimal()
-
-```
 
 
 ## PLSR con comps cuadraticas Upsilon3
@@ -745,16 +684,16 @@ res_plsr_2<- FPLSR_Upsilon3(
     alpha  = 0,
     beta = beta_init,
     gamma = gamma_init,
-    step_gradient = 0.01,
+    step_gradient = 0.05,
     iterations = 10000,
     tol = 1e-10,
     basis = basis,
     LdPenalization = harmacclLdf,
-    lambda_lin = 0,
-    lambda_quad = 0,
+    lambda_lin = 1e-4,
+    lambda_quad = 1e-4,
     nt_lin = 15,
     nt_quad = 60,
-    nivel_significancia_lin = 1, 
+    nivel_significancia_lin = 0.1, 
     nivel_significancia_quad = 0.05, 
     scale = TRUE)
 
@@ -787,10 +726,10 @@ res_noPCA <- Upsilon_naive(
     fd_centered=fd_train,
                                                y= y_train,     beta = beta_init,
     gamma = gamma_init,  alpha  = alpha_init, 
-                                       step_gradient = 15, iterations = 10000,
+                                       step_gradient = 1, iterations = 10000,
                                        basis = basis, tol = 1e-9,
                                         LdPenalization = harmacclLdf,
-                                       lambda_lin = 0,lambda_quad = 0)
+                                       lambda_lin = 1e-3,lambda_quad = 1e-4)
 
 
 beta_est_fd <- fd(coef = res_noPCA$beta, basisobj = basis)
@@ -809,8 +748,7 @@ print(paste("IMBSEB gamma: ", imseb_gamma_naive))
 
 # Evaluación del Modelos
 
-Comparo las curvas roc de los 3 modelos descriptos
-
+## Grafico las AUCROCS, AUCPR, y las estimaciones de beta y gamma para cada caso y se guardan en la carpeta PLOTS
 ```{r}
 
 
@@ -823,7 +761,7 @@ y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr, fd_valid, ba
 y_prob_valid_plsr_noquad   <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid, basis, modo = "PLSR")
 y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid, basis, modo = "PLSR")
 y_prob_valid_base_fpca    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, modelo_fpca$fpca_model$harmonics)
-y_prob_valid_base_fpca_noquad    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid, modelo_fpca_lin$fpca_model$harmonics)
 
 roc_pca    <- roc(response = y_valid, predictor = y_prob_valid_pca)
 roc_pca_noquad    <- roc(response = y_valid, predictor = y_prob_valid_pca_noquad)
@@ -891,24 +829,6 @@ dev.off()
 ```{r}
 library(PRROC)
 
-# --- Función idéntica: sigue calculando probabilidades ---
-predecir_probabilidades_validacion <- function(res, fd_valid_centered, estimationBasis, modo = c("PCA", "NoPCA", "PLSR")) {
-  modo <- match.arg(modo)
-  psi <- inprod(estimationBasis, estimationBasis)
-
-  A_valid <- t(fd_valid_centered$coefs)
-  A_psi_valid <- A_valid %*% psi
-  
-  beta  <- res$beta
-  gamma <- res$gamma
-  alpha <- res$alpha
-  
-  lin_pred  <- as.vector(A_psi_valid %*% beta)
-  quad_pred <- rowSums((A_psi_valid %*% gamma) * A_psi_valid)
-  y_prob_valid <- 1 / (1 + exp(-(alpha + lin_pred + quad_pred)))
-  
-  return(y_prob_valid)
-}
 
 # --- Calcular probabilidades de validación ---
 y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca_quad, fd_valid, basis, modo = "PCA")
@@ -917,8 +837,8 @@ y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid, b
 y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr, fd_valid, basis, modo = "PLSR")
 y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid, basis, modo = "PLSR")
 y_prob_valid_plsr_noquad <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid, basis, modo = "PLSR")
-y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, basis_fpca$harmonics)
-y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, basis_fpca$harmonics)
+y_prob_valid_base_fpca    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid, modelo_fpca_lin$fpca_model$harmonics)
 
 # --- Calcular curvas PR (Precision-Recall) ---
 # PRROC espera que las etiquetas positivas sean 1 y las negativas 0
@@ -1020,10 +940,7 @@ exportar_plot_beta_full(
 
 
 ```{r}
-# Asegurate de usar los nombres correctos de tus objetos reales.
-# Aquí asumo que existen:
-# res_pca_quad$beta, res_plsr$beta, res_noPCA$beta, beta_est_fpca, matriz_beta
-# gamma_est_pca, gamma_est_plsr, gamma_est_NOpca, gamma_est_fpca, gamma_true
+
 
 evalbasis <- eval.basis(t, basis)
 
@@ -1099,7 +1016,6 @@ for (nm in nombres) {
 
 
 ```
-Vemos que PLSR parece ser bastante peor en este caso, pero hay que tener en cuenta que consigue una representación no tan mala con tan solo 3 componentes! (se ve mejor en el grafico del final)
 
 #CAMBIO PENALIZACIÓN POR PARAMETROS LINEALES
 
@@ -1214,7 +1130,7 @@ ggplot(roc_df, aes(x = fpr, y = tpr, color = lambda)) +
   )
 
 ggsave(
-  filename = file.path("plots", paste0("curvas_ROC_lambda_lin_var_", varianza_fija, ".png")),
+  filename = file.path("plots/variandoPenalizacion", paste0("curvas_ROC_lambda_lin_var_", varianza_fija, ".png")),
   width = 7, height = 6, dpi = 300
 )
 

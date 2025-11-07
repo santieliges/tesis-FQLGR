@@ -35,94 +35,15 @@ Luego, voy a transformar a los log-periodogramas en functional data objects con 
 
 
 La mayor crítica que podría hacer es que esto es masomenos como realizar la transformada de bspline para tomar el periodograma y luego vuelvo a hacer una especie de transformación de bspline cuando transformo en un functional data object en la base de bspline, por lo que la interpretación del espacio puede ser poco intuitiva
-```{r}
 
-
-```
-
-```{r}
-# Leer un archivo .wav
-audio2 <- readWave("D:/Tesis/archive/archive/for-2sec/for-2seconds/testing/real/file10.wav_16k.wav_norm.wav_mono.wav_silence.wav_2sec.wav")
-
-
-mono_audio <- mono(audio2, "left")
-signal_real <- mono_audio@left
-fs <- mono_audio@samp.rate
-
-t <- seq(0, 2, length.out = length(signal_real))  # dominio temporal real
-rangeval <- c(0, 2)
-
-Lcoef <- c(3)
-harmacclLdf <- vec2Lfd(Lcoef, rangeval)
-
-estimationBasis <- create.bspline.basis(rangeval = rangeval, nbasis = 100)
-fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLdf)
-
-plot(t, signal_real, type = "l",
-      ylab = "Log-potencia")
-
-# Compute smooth basis coefficients 
-a <- fd2coef(as.matrix(signal_real), estimationBasis)
-
-# Recover smooth functional data
-fd_train <- coef2fd(a, estimationBasis) 
-
-#fd_train <- smooth.basis(argvals = t, y = as.matrix(signal_real), fdPar_obj)$fd
-fd_train_centered <- center.fd(fd_train)
-
-plot(fd_train)
-```
 
 
 
 ```{r}
-# Submuestreo: tomar 1 de cada 10 puntos
-sub_factor <- 10
-signal_sub <- signal_real[seq(1, length(signal_real), by = sub_factor)]
-t_sub <- t[seq(1, length(t), by = sub_factor)]
 
-# Repetimos el proceso con los datos reducidos
-fd_train <- smooth.basis(argvals = t_sub, 
-                         y = as.matrix(signal_sub), 
-                         fdPar_obj)$fd
-
-fd_train_centered <- center.fd(fd_train)
-
-# Graficar señal original y la reducida
-par(mfrow=c(2,1))
-plot(t, signal_real, type = "l", main = "Señal original (32000 puntos)")
-plot(t_sub, signal_sub, type = "l", main = "Señal submuestreada (3200 puntos)")
-plot(fd_train)
-
-```
-
-
-```{r}
-
-audio1 <- readWave("D:/Tesis/archive/archive/for-2sec/for-2seconds/testing/fake/file19.wav_16k.wav_norm.wav_mono.wav_silence.wav_2sec.wav")
-
-mono_audio <- mono(audio1, "left")
-signal_true <- mono_audio@left
-fs <- mono_audio@samp.rate
-
-plot(signal_true, type = "l")
-
-
-
-# Transformar los conjuntos a funciones
-fd_train <- smooth.basis(argvals = t, y = as.matrix(signal_true), fdPar_obj)$fd
-fd_train_centered <- center.fd(fd_train)
-
-plot(fd_train)
-
-```
-
-
-```{r}
-
- carpeta_training <- 'archive/for-2sec/for-2sec/training'
- carpeta_training_fake <- 'archive/archive/for-2sec/for-2seconds/training/fake'
- carpeta_training_real <- 'archive/archive/for-2sec/for-2seconds/training/real'
+ carpeta_training <- 'for-2sec/for-2sec/training'
+ carpeta_training_fake <- 'for-2sec/for-2seconds/training/fake'
+ carpeta_training_real <- 'for-2sec/for-2seconds/training/real'
  
  archivos_training_fake<- list.files(carpeta_training_fake, pattern = "\\.wav$", full.names = TRUE)
  archivos_training_real<- list.files(carpeta_training_real, pattern = "\\.wav$", full.names = TRUE)
@@ -133,25 +54,6 @@ plot(fd_train)
 ```
  
 
-# ```{r}
-# n_freqs <- t
-# # Lista para guardar los vectores
-# lista_signals_training_fake <- list()
-# nombres_training_fake <- c()
-# 
-# for (archivo in archivos_training_fake) {
-#   audio <- readWave(archivo)
-#   audio_mono <- mono(audio, "left")
-#   signal <- audio_mono@left
-# 
-#   lista_signals_training_fake[[length(lista_signals_training_fake) + 1]] <- signal
-#   nombres_training_fake <- c(nombres_training_fake, basename(archivo))
-# }
-# # Convertir lista a data.frame
-# df_signals_training_fake <- as.data.frame(do.call(rbind, lista_signals_training_fake))
-# rownames(df_signals_training_fake) <- nombres_training_fake
-#
-#```
 
 ```{r}
 
@@ -177,27 +79,7 @@ rownames(df_signals_training_fake) <- nombres_training_fake
 ```
 
 
-```{r}
-# n_freqs <- t
-# # Lista para guardar los vectores
-# lista_signals_training_real <- vector("list", length(archivos_training_real))
-# nombres_training_real <- rep(0, length(archivos_training_real))
-# 
-# cont = 1
-# for (archivo in archivos_training_real) {
-#   audio <- readWave(archivo)
-#   audio_mono <- mono(audio, "left")
-#   signal <- audio_mono@left
-#   
-#   lista_signals_training_real[[cont]] <- signal
-#   nombres_training_real[cont] <- basename(archivo)
-#   cont = cont+1
-# }
-# # Convertir lista a data.frame
-# df_signals_training_real <- as.data.frame(do.call(rbind, lista_signals_training_real))
-# rownames(df_signals_training_real) <- nombres_training_real
 
-```
 
 ```{r}
 # Lista para guardar los vectores
