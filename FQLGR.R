@@ -430,7 +430,8 @@ Upsilon_naive <- function(             fd_centered,
                                        lambda_quad = 1e-12, 
                                        modelo_quad = TRUE,
                                        tol = 1e-6,
-                                       batch_size = 100) {   
+                                       batch_size = 100,
+                                       verbose = TRUE) {   
   
   
   
@@ -466,7 +467,8 @@ Upsilon_naive <- function(             fd_centered,
                                                          penalty_beta_reduced = penalty_beta_reduced,
                                                          penalty_gamma_reduced = penalty_gamma_reduced,
                                                          beta = beta,
-                                                         gamma = gamma)
+                                                         gamma = gamma,
+                                                        verbose = verbose)
   
   gamma_original  <- H_gamma_naive(res_gradiente$UpsGamma)
   beta_original   <- res_gradiente$UpsBeta 
@@ -545,7 +547,8 @@ fpca_Upsilon0 <- function( fd_centered,
                            modelo_quad = TRUE,
                            tol = 1e-6,
                            batch_size = 100,
-                           scale = TRUE)
+                           scale = TRUE,
+                           verbose = TRUE)
 {
   cost_history <- numeric(iterations)
   n        <- nrow(fd_centered$coef)
@@ -602,7 +605,8 @@ fpca_Upsilon0 <- function( fd_centered,
                                                        penalty_beta_reduced = R,
                                                        penalty_gamma_reduced = R,
                                                        beta = beta,
-                                                       gamma = gamma)
+                                                       gamma = gamma,
+                                                       verbose = verbose)
   
   gamma_original  <- H_gamma_0(res_gradiente$UpsGamma)
   beta_original   <- H_beta_0(res_gradiente$UpsBeta) 
@@ -726,7 +730,8 @@ pca_coef_Upsilon1 <- function(             fd_centered,
                                            modelo_quad = TRUE,
                                            tol = 1e-6,
                                            batch_size = 100,
-                                           scale = TRUE) {   
+                                           scale = TRUE,
+                                           verbose = TRUE) {   
   
   
   
@@ -774,7 +779,8 @@ pca_coef_Upsilon1 <- function(             fd_centered,
                                                        beta = beta,
                                                        gamma = gamma,
                                                        V_lin = V,
-                                                       V_quad = V)
+                                                       V_quad = V,
+                                                       verbose = verbose)
   
   # --- Deshacer centrado/escala ---
   
@@ -1061,7 +1067,8 @@ PLSR_Upsilon_2 <- function(fd_centered, y, modelo_quad = TRUE,
     beta = beta,
     gamma = gamma,
     V_lin = V_lin,
-    V_quad = V_quad
+    V_quad = V_quad,
+    verbose = verbose
   )
   
   # deshacer centrado/escala: cuidar s_safe y dimensiones de V
@@ -1270,7 +1277,8 @@ FPLSR_Upsilon3 <- function(fd_centered, y, modelo_quad = TRUE,
     beta = beta,
     gamma = gamma,
     V_lin = V_lin,
-    V_quad = V_quad
+    V_quad = V_quad,
+    verbose = verbose
   )
   
   # deshacer centrado/escala: cuidar s_safe y dimensiones de V
