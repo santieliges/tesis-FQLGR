@@ -297,7 +297,7 @@ gradient_descent_penalized_quad <- function(
     UpsBeta <- do.call(transformada_beta_fun, args_beta)
   }
   
-  if (is.null(gamma) || !all(dim(gamma) == c(K_quad, K_quad))) {
+  if (is.null(gamma) || !all(dim(gamma) == c(K_lin, K_lin))) {
     UpsGamma <- rep(1e-8, K_quad)
   } else {
     args_gamma <- if (is.null(V_quad)) list(gamma) else list(gamma, V_quad)
@@ -513,7 +513,7 @@ transformada_beta_fpca <- function(beta) {
 # vech_transform: devuelve vech(gamma * M)
 transformada_gamma_fpca <- function(gamma, return_matrix = FALSE) {
   # construir M: 1 en diagonal, 2 en triángulo inferior, 0 en triángulo superior
-  p <- nrow(gamma)
+  p <- ncol(gamma)
   M <- matrix(0, nrow = p, ncol = p)
   diag(M) <- 1
   M[lower.tri(M)] <- 2
@@ -580,6 +580,12 @@ fpca_Upsilon0 <- function( fd_centered,
   
   Z_lin <- Xi_hat[, 1:p, drop = FALSE]
   Z_quad <- generar_matriz_cuadratica(Z_lin)
+  
+  # transformo los beta y gamma desde la base original a la base de fpca truncada
+  
+  #Si beta init y gamma init no son nulos: 
+  ## 1 tomar la base de de fd_centered, evaluar en la grilla de puntos
+  ## 2 tomar la base de fpca y evaluar en la grilla de puntos
   
   # 5. Rugosidad
   basis_phi <- phi_hat$basis
