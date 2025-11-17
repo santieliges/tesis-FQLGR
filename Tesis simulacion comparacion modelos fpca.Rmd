@@ -275,6 +275,7 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
     fd_obj = fd_obj,
     fd_centered = fd_centered,
     coef = coef,
+    alpha = alpha_true,
     coef_beta = coef_beta,
     coef_gamma = coef_gamma,
     beta = beta,
@@ -346,14 +347,14 @@ evaluar_modelos_simulados <- function(n = 3000,
         beta = beta_init,
         gamma = gamma_init,
         alpha = 0,
-        step_gradient = 0.001,
+        step_gradient = 0.005,
         iterations = 15000,
-        var_threshold = 0.8,
-        tol = 1e-7,
+        var_threshold = 0.7,
+        tol = 1e-8,
         basis = basis,
         LdPenalization = harmacclLdf,
-        lambda_lin = 1e-2,
-        lambda_quad = 1e-4,
+        lambda_lin = 1e-4,
+        lambda_quad = 0,
                 verbose = FALSE
 
       )
@@ -364,14 +365,14 @@ evaluar_modelos_simulados <- function(n = 3000,
         beta = beta_init,
         gamma = gamma_init,
         alpha = 0,
-        step_gradient = 0.001,
+        step_gradient = 0.005,
         iterations = 15000,
-        var_threshold = 0.8,
-        tol = 1e-7,
+        var_threshold = 0.7,
+        tol = 1e-8,
         basis = basis,
         LdPenalization = harmacclLdf,
         lambda_lin = 1e-4,
-        lambda_quad = 1e-4,
+        lambda_quad = 0,
         modelo_quad = FALSE,
                 verbose = FALSE
 
@@ -388,12 +389,12 @@ evaluar_modelos_simulados <- function(n = 3000,
         alpha = 0,
         step_gradient = 0.005,
         iterations = 10000,
-        var_threshold = 0.8,
-        tol = 1e-7,
+        var_threshold = 0.7,
+        tol = 1e-8,
         basis = basis,
         LdPenalization = harmacclLdf,
-        lambda_lin = 1e-3,
-        lambda_quad = 1e-3,
+        lambda_lin = 0,
+        lambda_quad = 0,
                 verbose = FALSE
 
       )
@@ -404,14 +405,14 @@ evaluar_modelos_simulados <- function(n = 3000,
         beta = beta_init,
         gamma = gamma_init,
         alpha = 0,
-        step_gradient = 0.05,
+        step_gradient = 0.005,
         iterations = 10000,
-        var_threshold = 0.8,
+        var_threshold = 0.7,
         basis = basis,
-        tol = 1e-7,
+        tol = 1e-8,
         LdPenalization = harmacclLdf,
-        lambda_lin = 1e-4,
-        lambda_quad = 1e-5,
+        lambda_lin = 0,
+        lambda_quad = 0,
         modelo_quad = FALSE,
         verbose = FALSE
       )
@@ -427,6 +428,14 @@ evaluar_modelos_simulados <- function(n = 3000,
       
       imseb_beta_fpca <- IMSEB_integral(beta_est_pca_quad, matriz_beta, t)
       imseb_gamma_fpca <- IMBSEB(matriz_gamma, gamma_est_pca_quad, t, t)
+      psi = inprod(fd_train$basis, fd_train$basis)
+    eig <- eigen(psi)
+    psi_half <- eig$vectors %*% diag(sqrt(eig$values)) %*% t(eig$vectors)
+    matriz_diseño_fpca <- t(fd_train$coefs) %*% psi_half
+    pca_fpca <- prcomp(matriz_diseño_fpca)
+    beta_est_fpca <- pca_fpca$rotation[,1:modelo_fpca$K] %*% modelo_fpca$beta
+    gamma_est_fpca <- pca_fpca$rotation[,1:modelo_fpca$K] %*% modelo_fpca$gamma %*% t(pca_fpca$rotation[,1:modelo_fpca$K])
+    mse_fpca <- MSEB(escenario$alpha, modelo_fpca$alpha, escenario$coef_beta, beta_est_fpca, escenario$coef_gamma, gamma_est_fpca)
       
       # Upsilon1
       beta_est_fd <- fd(coef = res_pca_quad$beta, basisobj = basis)
@@ -434,7 +443,8 @@ evaluar_modelos_simulados <- function(n = 3000,
       evalbasis <- eval.basis(t, basis)
       gamma_est_matriz <- evalbasis %*% res_pca_quad$gamma %*% t(evalbasis)
       imseb_gamma_pca <- IMBSEB(matriz_gamma, gamma_est_matriz, t, t)
-      
+      print(escenario$alpha)
+      mse_pca = MSEB(alpha_true = escenario$alpha, alpha_hat = modelo_fpca$alpha, beta_true = escenario$coef_beta, beta_hat = res_pca_quad$beta, gamma_true = escenario$coef_gamma, gamma_hat = res_pca_quad$gamma)
       # =======================
       # AUC ROC
       # =======================
@@ -467,7 +477,8 @@ evaluar_modelos_simulados <- function(n = 3000,
           cuadratico = TRUE,
           AUC = auc_base_fpca,
           IMSE_beta = imseb_beta_fpca,
-          IMSE_gamma = imseb_gamma_fpca
+          IMSE_gamma = imseb_gamma_fpca,
+          mse = mse_fpca
         ),
         data.frame(
           escenario = escenario_nombre,
@@ -476,7 +487,8 @@ evaluar_modelos_simulados <- function(n = 3000,
           cuadratico = TRUE,
           AUC = auc_pca,
           IMSE_beta = imseb_beta_pca,
-          IMSE_gamma = imseb_gamma_pca
+          IMSE_gamma = imseb_gamma_pca,
+          mse = mse_pca
         )
       )
     }
@@ -509,6 +521,20 @@ ggplot(resultados, aes(x = nbasis, y = IMSE_beta, color = modelo, linetype = esc
   labs(title = "Evolución del IMSE(β)", x = "nbasis", y = "IMSE β")
 
 resultados$IMSE_beta
+
+ggplot(resultados, aes(x = nbasis, y = IMSE_gamma, color = modelo, linetype = escenario)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Evolución del IMSE(gamma)", x = "nbasis", y = "IMSE gamma")
+
+resultados$IMSE_gamma
+
+ggplot(resultados, aes(x = nbasis, y = mse, color = modelo, linetype = escenario)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Evolución del mse", x = "nbasis", y = "MSE")
+
+resultados$mse
 ```
 
 

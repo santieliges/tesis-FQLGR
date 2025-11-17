@@ -83,6 +83,11 @@ fd_valid_centered <- center.fd(fd_valid)
 ## Modelo sobre base FPCA (Upsilon 0)
 
 ```{r}
+      # =======================
+      beta_init <- rnorm(nbasis, sd = 0.1)
+      gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+      
+
 modelo_fpca <- fpca_Upsilon0(
     fd_centered= fd_train,
     y= y_train,
@@ -464,5 +469,58 @@ for (nm in nombres) {
 
 
 
+```{r}
+nbasises = c(10,20,30,40,50,60,70,80,90)
+basises <- list()
+for (nbasis in nbasises) {
+  basises[[length(basises)+1]] <- create.fourier.basis(rangeval = freq_range, nbasis = nbasis)
+}
+
+densidades = c(ncol(X_train))
+
+params_Upsilon0 <- list(
+    step_gradient = 0.001,
+    iterations = 15000,
+    tol = 1e-10,
+    lambda_lin = 1e-4,
+    lambda_quad = 1e-5,
+    var_threshold = 0.9,
+    modelo_quad = TRUE
+)
+params_Upsilon1 <- list(
+    step_gradient = 0.001,
+    iterations = 15000,
+    tol = 1e-10,
+    lambda_lin = 0,
+    lambda_quad = 0,
+    var_threshold = 0.9,
+    modelo_quad = TRUE
+)
+resultados = evaluar_modelos_distintas_bases(
+                                        data = list(X_train = X_train, 
+                                                          X_valid = X_valid,
+                                                          y_train = y_train,
+                                                          y_valid = y_valid),
+                                      basises = basises,
+                                      densidades_grillas = densidades,
+                                      seed = 123,
+                                      Lcoef = c(3),
+                                      params_Upsilon0 = params_Upsilon0,
+                                      params_Upsilon1 = params_Upsilon1)
+
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(resultados, aes(x = nbasis, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según nbasis",
+       x = "nbasis", y = "AUC ROC")
+
+```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -33,6 +33,180 @@ predecir_probabilidades_validacion <- function(res, fd_valid_centered, estimatio
   return(y_prob_valid)
 }
 
+evaluar_modelos_distintas_bases <- function(
+    data = list(),
+    basises = list(),
+    densidades_grillas = c(),
+    seed = 123,
+    Lcoef = c(2),
+    params_Upsilon0 = list(),
+    params_Upsilon1 = list()
+) {
+  
+  library(pROC)
+  set.seed(seed)
+  resultados <- data.frame()
+  
+  # Utilidad: extrae un parámetro, o usa un valor por defecto
+  get_param <- function(lst, name, default) {
+    if (!is.null(lst[[name]])) return(lst[[name]])
+    return(default)
+  }
+  
+  for (basis in basises) {
+    
+    cat("====================================\n")
+    cat("nbasis =", basis$nbasis, "\n")
+    cat("====================================\n")
+    
+    X_train <- data$X_train
+    X_valid <- data$X_valid
+    y_train <- data$y_train
+    y_valid <- data$y_valid
+    
+    rangevals <- basis$rangeval
+    
+    for (densidad in densidades_grillas) {
+      
+      t <- seq(rangevals[1], rangevals[2], length.out = densidad)
+
+      harmacclLfd <- vec2Lfd(Lcoef, rangevals)
+      fdPar_obj <- fdPar(basis, harmacclLfd)
+      
+      # ---------- Suavizado ----------
+      fd_train <- smooth.basis(argvals = t, y = t(X_train), fdParobj = fdPar_obj)$fd
+      fd_train_centered <- center.fd(fd_train)
+
+      fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdParobj = fdPar_obj)$fd
+      fd_valid_centered <- center.fd(fd_valid) 
+      # ---------- Inicialización ----------
+      nb <- basis$nbasis
+      beta_init  <- rnorm(nb, sd = 0.1)
+      gamma_init <- matrix(rnorm(nb^2, sd = 0.1), nrow = nb)
+      
+      
+      # ================================
+      #   MODELO FPCA — Upsilon0
+      # ================================
+      
+      modelo_fpca <- fpca_Upsilon0(
+        fd_centered = fd_train_centered,
+        y = y_train,
+        beta = beta_init,
+        gamma = gamma_init,
+        alpha = 0,
+        step_gradient = get_param(params_Upsilon0, "step_gradient", 0.005),
+        iterations   = get_param(params_Upsilon0, "iterations", 15000),
+        tol          = get_param(params_Upsilon0, "tol", 1e-8),
+        var_threshold = get_param(params_Upsilon0, "var_threshold", 0.8),
+        basis = basis,
+        LdPenalization = harmacclLfd,
+        lambda_lin  = get_param(params_Upsilon0, "lambda_lin", 1e-4),
+        lambda_quad = get_param(params_Upsilon0, "lambda_quad", 0),
+        modelo_quad = get_param(params_Upsilon0, "modelo_quad", TRUE),
+        verbose = FALSE
+      )
+      
+      modelo_fpca_lin <- fpca_Upsilon0(
+        fd_centered = fd_train_centered,
+        y = y_train,
+        beta = beta_init,
+        gamma = gamma_init,
+        alpha = 0,
+        step_gradient = get_param(params_Upsilon0, "step_gradient", 0.005),
+        iterations   = get_param(params_Upsilon0, "iterations", 15000),
+        tol          = get_param(params_Upsilon0, "tol", 1e-8),
+        var_threshold = get_param(params_Upsilon0, "var_threshold", 0.8),
+        basis = basis,
+        LdPenalization = harmacclLfd,
+        lambda_lin  = get_param(params_Upsilon0, "lambda_lin", 1e-4),
+        lambda_quad = get_param(params_Upsilon0, "lambda_quad", 0),
+        modelo_quad = FALSE,
+        verbose = FALSE
+      )
+      
+      
+      # ================================
+      #   MODELO PCA COEF — Upsilon1
+      # ================================
+      
+      res_pca_quad <- pca_coef_Upsilon1(
+        fd_centered = fd_train_centered,
+        y = y_train,
+        beta = beta_init,
+        gamma = gamma_init,
+        alpha = 0,
+        step_gradient = get_param(params_Upsilon1, "step_gradient", 0.005),
+        iterations   = get_param(params_Upsilon1, "iterations", 10000),
+        tol          = get_param(params_Upsilon1, "tol", 1e-8),
+        var_threshold = get_param(params_Upsilon1, "var_threshold", 0.8),
+        basis = basis,
+        LdPenalization = harmacclLfd,
+        lambda_lin  = get_param(params_Upsilon1, "lambda_lin", 0),
+        lambda_quad = get_param(params_Upsilon1, "lambda_quad", 0),
+        modelo_quad = get_param(params_Upsilon1, "modelo_quad", TRUE),
+        verbose = FALSE
+      )
+      
+      res_pca_noquad <- pca_coef_Upsilon1(
+        fd_centered = fd_train_centered,
+        y = y_train,
+        beta = beta_init,
+        gamma = gamma_init,
+        alpha = 0,
+        step_gradient = get_param(params_Upsilon1, "step_gradient", 0.005),
+        iterations   = get_param(params_Upsilon1, "iterations", 10000),
+        tol          = get_param(params_Upsilon1, "tol", 1e-8),
+        var_threshold = get_param(params_Upsilon1, "var_threshold", 0.8),
+        basis = basis,
+        LdPenalization = harmacclLfd,
+        lambda_lin  = get_param(params_Upsilon1, "lambda_lin", 0),
+        lambda_quad = get_param(params_Upsilon1, "lambda_quad", 0),
+        modelo_quad = FALSE,
+        verbose = FALSE
+      )
+      
+      
+      # =======================
+      #   AUC
+      # =======================
+      y_prob_fpca <- predecir_probabilidades_validacion_en_base_fpca(
+        modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+      
+      y_prob_fpca_lin <- predecir_probabilidades_validacion_en_base_fpca(
+        modelo_fpca_lin, fd_valid_centered, modelo_fpca_lin$fpca_model$harmonics)
+      
+      y_prob_pca <- predecir_probabilidades_validacion(
+        res_pca_quad, fd_valid_centered, basis, modo = "PCA")
+      
+      y_prob_pca_lin <- predecir_probabilidades_validacion(
+        res_pca_noquad, fd_valid_centered, basis, modo = "PCA")
+      
+      
+      resultados <- rbind(
+        resultados,
+        data.frame(
+          escenario = basis$nbasis,
+          nbasis = basis$nbasis,
+          modelo = "fpca_Upsilon0",
+          cuadratico = TRUE,
+          AUC = auc(roc(y_valid, y_prob_fpca))
+        ),
+        data.frame(
+          escenario = basis$nbasis,
+          nbasis = basis$nbasis,
+          modelo = "pca_Upsilon1",
+          cuadratico = TRUE,
+          AUC = auc(roc(y_valid, y_prob_pca))
+        )
+      )
+    }
+  }
+  
+  return(resultados)
+}
+
+
 #################################### funciones auxiliares para exportar graficos ############################
 
 #### Exportar gráficos para tesis (sin títulos) ####
