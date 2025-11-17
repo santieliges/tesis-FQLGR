@@ -415,15 +415,11 @@ Sigma <- Sigma * diag(seq(nbasis, 1))
 # Simulación de coeficientes correlacionados
 coef <- mvrnorm(n, mu = mean_coef, Sigma = Sigma)
 fd_obj <- fd(coef = t(coef), basisobj = basis)
-
+mean_fd = mean.fd(fd_obj)
 # Gráfico de funciones simuladas
 plot(fd_obj, main = "Datos Funcionales Simulados (coef. correlacionados)",
      xlab = "Tiempo", ylab = "Valor observado", col = rgb(0.2, 0.4, 0.6, 0.2))
-mean_fd <- mean.fd(fd_obj)
 lines(mean_fd, col = "red", lwd = 3)
-
-#Las centro
-fd_centered <- center.fd(fd_obj)
 
 
 # =====================================================================
@@ -486,8 +482,12 @@ psi <- inprod(basis,basis)
 idx_train <- sample(1:n_total, size = floor(0.7 * n_total))
 idx_valid <- setdiff(1:n_total, idx_train)
 
-fd_train <- fd(center.fd(fd_obj)[["coefs"]][, idx_train], basis)
-fd_valid <- fd(center.fd(fd_obj)[["coefs"]][, idx_valid], basis)
+fd_train <- fd(fd_obj[["coefs"]][, idx_train], basis)
+fd_train = center.fd(fd_train)
+fd_train_center = mean.fd(fd_train)
+fd_valid <- fd(fd_obj[["coefs"]][, idx_valid], basis)
+fd_valid_centered <- fd_valid
+fd_valid_centered$coefs <- fd_valid$coefs - as.vector(fd_train_center$coef)
 
 alpha_true <- balance_alpha(center.fd(fd_obj), psi, coef_beta, coef_gamma)
 alpha_true
@@ -524,14 +524,14 @@ modelo_fpca <- fpca_Upsilon0(fd_centered=fd_train,
     beta = beta_init,
     gamma =gamma_init,
     alpha  = 0,
-    step_gradient = 0.001,
+    step_gradient = 0.01,
     iterations = 15000,
     var_threshold = 0.8,
-    tol = 1e-7,
+    tol = 1e-8,
     basis = basis,
     LdPenalization = harmacclLdf,
-    lambda_lin = 1e-2	,
-    lambda_quad = 1e-4)
+    lambda_lin = 1e-1	,
+    lambda_quad = 0.1)
 
 basis_fpca <- modelo_fpca$fpca_model
 eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
@@ -582,14 +582,14 @@ res_pca_quad <- pca_coef_Upsilon1(
     beta = beta_init,
     gamma =gamma_init,
     alpha  = 0,
-    step_gradient = 0.005,
+    step_gradient = 0.03,
     iterations = 10000,
-    var_threshold = 0.75,
+    var_threshold = 0.7,
     tol = 1e-9,
     basis = basis,
     LdPenalization = harmacclLdf,
-    lambda_lin = 1e-3	,
-    lambda_quad = 1e-3
+    lambda_lin = 1e-1	,
+    lambda_quad = 100
     )
 
 beta_est_fd <- fd(coef = res_pca_quad$beta, basisobj = basis)
@@ -651,7 +651,7 @@ imseb_gamma_plsr <- IMBSEB(matriz_gamma, gamma_est_matriz, t, t)
 print(paste("IMBSEB gamma: ", imseb_gamma_plsr))
 
 
-res_plsr_noquad<- gradient_descent_penalized_plsr(
+res_plsr_noquad<- PLSR_Upsilon_2(
     fd_centered=fd_train,
     y= y_train,
     beta = beta_init,
@@ -672,7 +672,7 @@ res_plsr_noquad<- gradient_descent_penalized_plsr(
 
 
 
-## PLSR con comps cuadraticas Upsilon3
+## PLSR con comps cuadraticas Upsilon 3
 ```{r}
 beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
@@ -690,11 +690,11 @@ res_plsr_2<- FPLSR_Upsilon3(
     basis = basis,
     LdPenalization = harmacclLdf,
     lambda_lin = 1e-4,
-    lambda_quad = 1e-4,
+    lambda_quad = 1e-2,
     nt_lin = 15,
     nt_quad = 60,
     nivel_significancia_lin = 0.1, 
-    nivel_significancia_quad = 0.05, 
+    nivel_significancia_quad = 0.1, 
     scale = TRUE)
 
 
@@ -727,7 +727,7 @@ res_noPCA <- Upsilon_naive(
                                                y= y_train,     beta = beta_init,
     gamma = gamma_init,  alpha  = alpha_init, 
                                        step_gradient = 1, iterations = 10000,
-                                       basis = basis, tol = 1e-9,
+                                       basis = basis, tol = 1e-8,
                                         LdPenalization = harmacclLdf,
                                        lambda_lin = 1e-3,lambda_quad = 1e-4)
 

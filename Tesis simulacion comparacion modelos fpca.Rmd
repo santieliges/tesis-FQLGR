@@ -207,8 +207,6 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
   coef <- mvrnorm(n, mu = mean_coef, Sigma = Sigma)
   fd_obj <- fd(coef = t(coef), basisobj = basis)
   
-  # Centrado
-  fd_centered <- center.fd(fd_obj)
   
   # ================================
   # 3. Coeficientes verdaderos (β(t), γ(s,t))
@@ -248,8 +246,11 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
   idx_train <- sample(1:n, size = floor(0.7 * n))
   idx_valid <- setdiff(1:n, idx_train)
   
-  fd_train <- fd(fd_centered$coefs[, idx_train], basis)
-  fd_valid <- fd(fd_centered$coefs[, idx_valid], basis)
+  fd_train <- fd(fd_obj$coefs[, idx_train], basis)
+  fd_train = center.fd(fd_train)
+  center_fd_train = mean.fd(fd_train)
+  fd_valid <- fd(fd_obj$coefs[, idx_valid], basis)
+  fd_valid$coefs = fd_valid$coefs - as.vector(center_fd_train$coefs)
   
   # =================================
   # 5.prediccion

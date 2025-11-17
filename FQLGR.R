@@ -502,7 +502,7 @@ gradient_descent_penalized_quad <- function(
     
     penal_lin <- lambda_lin * 2 * penalty_beta_reduced %*% Hbeta_val
     args_transform_beta <- if (is.null(V_lin)) list(penal_lin) else list(penal_lin, V_lin)
-    grad_beta <- -(1/nb) * t(Zb_lin) %*% residuos - do.call(transformada_beta_fun, args_transform_beta)
+    grad_beta <- -(1/nb) * t(Zb_lin) %*% residuos + do.call(transformada_beta_fun, args_transform_beta)
     
     # --- Gradiente gamma ---
     if (modelo_quad) {
@@ -511,7 +511,7 @@ gradient_descent_penalized_quad <- function(
       
       penal_quad <- lambda_quad * 2 * penalty_gamma_reduced %*% Hgamma_val %*% t(penalty_gamma_reduced)
       args_transform_gamma <- if (is.null(V_quad)) list(penal_quad) else list(penal_quad, V_quad)
-      grad_gamma <- -(1/nb) * t(Zb_quad) %*% residuos - do.call(transformada_gamma_fun, args_transform_gamma)
+      grad_gamma <- -(1/nb) * t(Zb_quad) %*% residuos + do.call(transformada_gamma_fun, args_transform_gamma)
     }
     
     # --- Actualización ---
@@ -962,7 +962,7 @@ pca_coef_Upsilon1 <- function(             fd_centered,
                                                        V_quad = V,
                                                        verbose = verbose)
   
-  # --- Deshacer centrado/escala ---
+  # --- Deshacer escala ---
   
   mu <- pca_result$center  # longitud p
   s  <- if (scale) pca_result$scale else rep(1, length(mu))  # <--- solo si scale=TRUE
@@ -970,7 +970,7 @@ pca_coef_Upsilon1 <- function(             fd_centered,
   s_safe_matrix <- matrix(s_safe, nrow = length(s_safe), ncol = 1)
   
   # matriz de autovectores pero escalada dandonos la transformación al espacio original.
-  V  <- (pca_result$rotation * 1/s_safe)[, 1:K, drop = FALSE] + mu
+  V  <- (pca_result$rotation * 1/s_safe)[, 1:K, drop = FALSE]
   
   gamma_original  <- H_gamma_1(res_gradiente$UpsGamma, V)
   beta_original   <- H_beta_1(res_gradiente$UpsBeta, V) 
@@ -1251,7 +1251,7 @@ PLSR_Upsilon_2 <- function(fd_centered, y, modelo_quad = TRUE,
     verbose = verbose
   )
   
-  # deshacer centrado/escala: cuidar s_safe y dimensiones de V
+  # deshacer escala: cuidar s_safe y dimensiones de V
   mu_lin <- pls_model_lin$center
   s_lin  <- if (scale) pls_model_lin$scale else rep(1, length(mu_lin))
   s_safe_lin <- ifelse(s_lin == 0, 1, s_lin)
@@ -1461,7 +1461,7 @@ FPLSR_Upsilon3 <- function(fd_centered, y, modelo_quad = TRUE,
     verbose = verbose
   )
   
-  # deshacer centrado/escala: cuidar s_safe y dimensiones de V
+  # deshacer escala: cuidar s_safe y dimensiones de V
   mu_lin <- pls_model_lin$center
   s_lin  <- if (scale) pls_model_lin$scale else rep(1, length(mu_lin))
   s_safe_lin <- ifelse(s_lin == 0, 1, s_lin)
@@ -1469,7 +1469,7 @@ FPLSR_Upsilon3 <- function(fd_centered, y, modelo_quad = TRUE,
   V_scaled_lin <- (V_lin * (1 / s_safe_lin[1:nrow(V_lin)]))
   V_scaled_lin <- as.matrix(V_scaled_lin)
   
-  # deshacer centrado/escala: cuidar s_safe y dimensiones de V
+  # deshacer escala: cuidar s_safe y dimensiones de V
   mu_quad <- pls_model_quad$center
   s_quad  <- if (scale) pls_model_quad$scale else rep(1, length(mu_quad))
   s_safe_quad <- ifelse(s_quad == 0, 1, s_quad)
