@@ -430,6 +430,8 @@ evaluar_modelos_simulados <- function(n = 3000,
       imseb_beta_fpca <- IMSEB_integral(beta_est_pca_quad, matriz_beta, t)
       imseb_gamma_fpca <- IMBSEB(matriz_gamma, gamma_est_pca_quad, t, t)
       psi = inprod(fd_train$basis, fd_train$basis)
+      cond_psi <- kappa(psi)
+
     eig <- eigen(psi)
     psi_half <- eig$vectors %*% diag(sqrt(eig$values)) %*% t(eig$vectors)
     matriz_diseño_fpca <- t(fd_train$coefs) %*% psi_half
@@ -479,7 +481,8 @@ evaluar_modelos_simulados <- function(n = 3000,
           AUC = auc_base_fpca,
           IMSE_beta = imseb_beta_fpca,
           IMSE_gamma = imseb_gamma_fpca,
-          mse = mse_fpca
+          mse = mse_fpca,
+          cond_psi = cond_psi
         ),
         data.frame(
           escenario = escenario_nombre,
@@ -489,7 +492,8 @@ evaluar_modelos_simulados <- function(n = 3000,
           AUC = auc_pca,
           IMSE_beta = imseb_beta_pca,
           IMSE_gamma = imseb_gamma_pca,
-          mse = mse_pca
+          mse = mse_pca,
+          cond_psi = cond_psi
         )
       )
     }

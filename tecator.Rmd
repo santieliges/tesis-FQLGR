@@ -136,9 +136,9 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 10000, var_threshold = 0.85, LdPenalization = harmacclLfd, lambda_lin = 0.01, lambda_quad = 0.001)
+res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 10000, var_threshold = 0.9, LdPenalization = harmacclLfd, lambda_lin = 0.01, lambda_quad = 0.001)
 
-res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 10000, var_threshold = 0.85, LdPenalization = harmacclLfd, lambda_lin = 0.01, lambda_quad = 0.001, modelo_quad = FALSE)
+res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 10000, var_threshold = 0.9, LdPenalization = harmacclLfd, lambda_lin = 0.01, lambda_quad = 0.001, modelo_quad = FALSE)
 ```
 
 
