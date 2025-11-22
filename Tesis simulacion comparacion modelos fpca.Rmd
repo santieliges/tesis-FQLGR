@@ -172,7 +172,7 @@ balance_alpha <- function(fd_centered, psi, coef_beta, coef_gamma, target = 0.5)
     probs <- predict_log_func(fd_centered, psi, coef_beta, coef_gamma, alpha)
     mean(probs) - target
   }
-  uniroot(f, c(-1e4, 1e4))$root
+  uniroot(f, c(-1e5, 1e5))$root
 }
 ```
 
@@ -343,11 +343,176 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123,
 ```
 
 ```{r}
+simular_datos_funcionales_chol <- function(
+    t, n = 3000, nbasis = 50, seed = 123,
+    tipo_basis = "bspline",
+    escenario = c("ligero", "denso")) 
+{
+  library(fda)
+  library(MASS)
+  
+  escenario <- match.arg(escenario)
+  set.seed(seed)
+  rangeval <- range(t)
+
+  # ================================
+  # 1. Selección de base
+  # ================================
+  if (tipo_basis == "bspline") {
+    norder <- 4
+    if (escenario == "ligero") {
+      knots <- seq(rangeval[1], rangeval[2], length.out = nbasis - norder + 2)
+      basis <- create.bspline.basis(rangeval, nbasis = nbasis, norder = norder, breaks = knots)
+    } else {
+      num_knots <- nbasis - norder + 2
+      knots <- seq(rangeval[1], rangeval[2], length.out = num_knots)
+      basis <- create.bspline.basis(rangeval, norder = norder, breaks = knots, nbasis = nbasis)
+    }
+  } else if (tipo_basis == "fourier") {
+    basis <- create.fourier.basis(rangeval, nbasis = nbasis)
+  } else {
+    stop("tipo_basis debe ser 'bspline' o 'fourier'")
+  }
+
+  # ================================
+  # 2. Coeficientes correlacionados (AR(1))
+  # ================================
+  mean_coef <- rnorm(nbasis, sd = seq(1, nbasis) / nbasis)
+  rho <- 0.8
+  Sigma <- outer(1:nbasis, 1:nbasis, function(i, j) rho^abs(i - j))
+  Sigma <- Sigma * diag(seq(nbasis, 1))
+  coef <- mvrnorm(n, mu = mean_coef, Sigma = Sigma)
+  fd_obj <- fd(coef = t(coef), basisobj = basis)
+
+  # ================================
+  # ORTONORMALIZACIÓN VIA CHOLESKY
+  # ================================
+  Psi <- inprod(basis, basis)
+  M <- chol(Psi)
+  Minv <- solve(M)
+
+  coef_ortho <- Minv %*% fd_obj$coefs
+  fd_obj_ortho <- fd(coef = coef_ortho, basisobj = basis)
+
+  # ================================
+  # 3. Verdaderos coeficientes β(t) y γ(s,t)
+  # ================================
+  s <- t
+  beta <- 2 * sin(2 * pi * t) + 0.5 * cos(4 * pi * t)
+  matriz_beta <- beta / max(abs(beta))
+
+  Sigma_gamma <- 0.6
+  matriz_gamma <- outer(s, t, function(s, t) {
+    exp(-( (s - t)^2 ) / (2 * Sigma_gamma^2)) +
+      0.5 * sin(pi * s) * sin(pi * t)
+  })
+  matriz_gamma <- (matriz_gamma + t(matriz_gamma)) / 2
+
+  # ================================
+  # 4. Proyección sobre la base
+  # ================================
+  fd_beta <- Data2fd(argvals = t, y = matriz_beta, basisobj = basis)
+  coef_beta <- fd_beta$coefs
+  coef_beta_ortho <- Minv %*% coef_beta
+
+  Phi_s <- eval.basis(s, basis)
+  Phi_t <- eval.basis(t, basis)
+
+  A <- t(Phi_s) %*% matriz_gamma %*% Phi_t
+  G_s <- t(Phi_s) %*% Phi_s
+  G_t <- t(Phi_t) %*% Phi_t
+  A_est <- solve(G_s) %*% A %*% solve(G_t)
+  coef_gamma <- (A_est + t(A_est)) / 2
+  coef_gamma_ortho <- Minv %*% coef_gamma %*% t(Minv)
+
+  # ================================
+  # 4b. Normalizar beta y gamma para no saturar la función logística
+  # ================================
+  coef_beta_ortho_scaled  <- coef_beta_ortho / max(abs(coef_beta_ortho))
+  coef_gamma_ortho_scaled <- coef_gamma_ortho / max(abs(coef_gamma_ortho))
+
+  # ================================
+  # 5. División Train/Valid + centrado
+  # ================================
+  idx_train <- sample(1:n, size = floor(0.7 * n))
+  idx_valid <- setdiff(1:n, idx_train)
+
+  coef_train <- coef_ortho[, idx_train]
+  coef_valid <- coef_ortho[, idx_valid]
+
+  mean_train <- rowMeans(coef_train)
+  coef_train_centered <- coef_train - mean_train
+  coef_valid_centered <- coef_valid - mean_train
+
+  fd_train <- fd(coef_train_centered, basis)
+  fd_valid <- fd(coef_valid_centered, basis)
+
+  # ================================
+  # 6. Generar etiquetas con alpha balanceado
+  # ================================
+  psi_ortho <- diag(nbasis)
+
+  # alpha basado en probabilidad media
+
+  alpha_true <- balance_alpha(center.fd(fd_obj_ortho), psi_ortho, coef_beta_ortho_scaled, coef_gamma_ortho_scaled)
+
+  prob_total <- predict_log_func(fd_obj_ortho, psi_ortho,
+                                 coef_beta_ortho_scaled, coef_gamma_ortho_scaled, alpha_true)
+  y_total <- pred_mod_log_func(prob_total)
+
+  y_train <- y_total[idx_train]
+  y_valid <- y_total[idx_valid]
+
+  # ================================
+  # 7. Salida
+  # ================================
+  return(list(
+    t = t,
+    s = s,
+    basis = basis,
+    tipo_basis = tipo_basis,
+
+    # matrices ortonormalización
+    Psi = Psi,
+    M = M,
+    Minv = Minv,
+
+    # objetos funcionales
+    fd_obj_original = fd_obj,
+    fd_obj = fd_obj_ortho,
+
+    coef_original = coef,
+    coef_ortho = coef_ortho,
+
+    # betas y gammas normalizados
+    coef_beta = coef_beta_ortho_scaled,
+    coef_gamma = coef_gamma_ortho_scaled,
+    
+    alpha = alpha_true,
+    beta = beta,
+    matriz_beta = matriz_beta,
+    matriz_gamma = matriz_gamma,
+
+    idx_train = idx_train,
+    idx_valid = idx_valid,
+    fd_train = fd_train,
+    fd_valid = fd_valid,
+    y_train = y_train,
+    y_valid = y_valid
+  ))
+}
+
+```
+
+
+```{r}
     escenario_denso   <- simular_datos_funcionales(seq(-1, 1, length.out = 201), 3000, nbasis = 100, seed = 123, escenario = "denso")
     escenario_ligero  <- simular_datos_funcionales(seq(-1, 1, length.out = 201), 3000, nbasis = 100, seed = 123, escenario = "ligero")
     
-   
-    
+       escenario_ligero_chol  <- simular_datos_funcionales_chol(seq(-1, 1, length.out = 201),1000, nbasis = 100, seed = 123, escenario = "denso")
+  
+       sum(escenario_ligero_chol$y_train)/length(escenario_ligero_chol$y_train)
+
 ```
 
 
@@ -357,7 +522,8 @@ evaluar_modelos_simulados <- function(n = 3000,
                                       t,
                                       seed = 123,
                                       Lcoef = 2,
-                                      tipo_basis="bspline") {
+                                      tipo_basis="bspline",
+                                      chol = FALSE) {
   library(pROC)
   resultados <- data.frame()
   
@@ -367,8 +533,15 @@ evaluar_modelos_simulados <- function(n = 3000,
     cat("====================================\n")
     
     # 1. Simulación densa y ligera
-    escenario_denso   <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "denso")
+    if (chol) {
+      escenario_denso   <- simular_datos_funcionales_chol(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "denso")
+    escenario_ligero  <- simular_datos_funcionales_chol(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "ligero")
+    }
+    else{
+      
+      escenario_denso   <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "denso")
     escenario_ligero  <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "ligero")
+    }
     
     for (escenario_nombre in c("denso", "ligero")) {
       escenario <- if (escenario_nombre == "denso") escenario_denso else escenario_ligero
@@ -568,6 +741,9 @@ evaluar_modelos_simulados <- function(n = 3000,
 ```{r}
 resultados_bspline = evaluar_modelos_simulados(3000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(3)
 )
+
+resultados_bspline_chol = evaluar_modelos_simulados(3000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(3), chol = TRUE
+)
 ```
 
 
@@ -587,6 +763,19 @@ resultados_bspline <- resultados_bspline %>%
   )
 
 save(resultados_bspline, file = "resultados_condgram_simulacion_bspline.RData")
+
+
+resultados_bspline_chol <- resultados_bspline_chol  %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0_equivalencia" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+save(resultados_bspline_chol, file = "resultados_condgram_simulacion_bspline_chol.RData")
 ```
 
 ```{r}
@@ -719,8 +908,134 @@ ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
        plot = p6, width = 7, height = 5, dpi = 300)
 ```
 
+```{r}
+library(ggplot2)
+
+# 1. Crear carpeta si no existe
+carpeta <- "plots/comparacion modelos numero cond bspline cholesky"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+resultados_bspline_chol$base <- "bspline_chol"
+
+
+p1 <- ggplot(resultados_bspline_chol, aes(x = nbasis, y = AUC, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de AUC según nbasis"),
+    x = "nbasis",
+    y = "AUC ROC"
+  )
+
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+library(ggplot2)
+library(dplyr)
+
+# Obtener los nombres únicos de los escenarios
+escenarios_unicos <- unique(resultados_bspline_chol$escenario)
+
+# Iterar sobre cada escenario único y generar un plot
+for (escenario_actual in escenarios_unicos) {
+  
+  # 1. Filtrar los datos para el escenario actual
+  datos_filtrados <- resultados_bspline_chol %>%
+    filter(escenario == escenario_actual)
+  
+  # 2. Generar el plot
+  p_escenario <- ggplot(datos_filtrados, aes(x = cond_psi, y = AUC, color = modelo)) +
+    geom_line(size = 1.2) +
+    geom_point() +
+    # Usamos scale_color_discrete para interpretar las etiquetas de los modelos
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    theme_minimal() +
+    labs(
+      # Título adaptado para incluir el nombre del escenario
+      title = expression(paste("Evolución de AUC según ", kappa(Psi), " - Escenario: ", escenario_actual)),
+      x = expression(kappa(Psi)),
+      y = "AUC ROC",
+      color = "Modelo"
+    )
+  
+  # 3. Guardar el plot con un nombre de archivo específico para el escenario
+  # Se reemplaza ' ' y otros caracteres especiales en el nombre del escenario para el archivo
+  nombre_base <- gsub("[^[:alnum:]]", "_", escenario_actual)
+  nombre_archivo <- paste0("AUC_vs_cond_psi_", nombre_base, ".png")
+  
+  ggsave(filename = file.path(carpeta, nombre_archivo),
+         plot = p_escenario, width = 7, height = 5, dpi = 300)
+  
+  cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
+}
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_bspline_chol, aes(x = nbasis, y = cond_psi, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "kappa(Psi)")
+
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
+
+# Obtener los nombres únicos de los escenarios
+escenarios_unicos <- unique(resultados_bspline_chol$escenario)
+
+# Iterar sobre cada escenario único y generar un plot
+for (escenario_actual in escenarios_unicos) {
+  
+  # 1. Filtrar los datos para el escenario actual
+  datos_filtrados <- resultados_bspline_chol %>%
+    filter(escenario == escenario_actual)
+  
+  # 2. Generar el plot (similar a tu código original, pero sin 'linetype = escenario')
+  p_escenario <- ggplot(datos_filtrados, aes(x = cond_psi, y = mse, color = modelo)) +
+    geom_line(size = 1.2) +
+    geom_point() +
+    # Usamos scale_color_discrete para interpretar las etiquetas de los modelos
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    theme_minimal() +
+    labs(
+      # Título adaptado para incluir el nombre del escenario
+      title = expression(paste("Evolución de AUC según ", kappa(Psi), " - Escenario: ", escenario_actual)),
+      x = expression(kappa(Psi)),
+      y = "AUC ROC",
+      color = "Modelo"
+    )
+  
+  # 3. Guardar el plot con un nombre de archivo específico para el escenario
+  nombre_archivo <- paste0("msevskappa(psi)_", escenario_actual, ".png")
+  
+  ggsave(filename = file.path(carpeta, nombre_archivo),
+         plot = p_escenario, width = 7, height = 5, dpi = 300)
+  
+  cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
+}
+# ---- PLOT 6 ----
+p6 <- ggplot(resultados_bspline_chol, aes(x = nbasis, y = mse, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de MSE según nbasis"),
+    x =  "nbasis",
+    y = "mse"
+  )
+
+ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
+       plot = p6, width = 7, height = 5, dpi = 300)
+```
 
 ```{r}
+
 resultados_fourier = evaluar_modelos_simulados(3000, c(11,15,31,41,51,61,71,81,91), t = seq(-1, 1, length.out = 301), seed = 123, Lcoef = c(3), tipo_basis = "fourier"
 )
 ```
@@ -806,15 +1121,15 @@ for (escenario_actual in escenarios_unicos) {
   cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
 }
 # ---- PLOT 4 ----
-p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = cond_psi, color = modelo ,linetype = escenario)) +
+p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = AUC, color = modelo ,linetype = escenario)) +
   geom_line(size = 1.2) +
   geom_point() +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
-  labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "kappa(Psi)")
+  labs(title = "Evolución de AUC ROC según nbasis",
+       x = "nbasis", y = "AUC ROC")
 
-ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+ggsave(filename = file.path(carpeta, "aucroc_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
 
 # ---- PLOT 5 ----

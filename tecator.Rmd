@@ -17,6 +17,12 @@ source("FQLGR.R")
 ## Cargo datos
 
 ```{r}
+load("modelos_tecator.RData")
+load("resultados_cond_tecator.RData")
+```
+
+
+```{r}
 #### si no se encuentra a tecator, hay que destilday y volver a tildar a fda.usc en "packages"
 library(fda.usc)
 

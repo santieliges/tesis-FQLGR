@@ -211,6 +211,143 @@ evaluar_modelos_distintas_bases <- function(
   return(resultados)
 }
 
+pca.fd.nopenalty <- function(fdobj, nharm = 2, harmfdPar = fdPar(fdobj),
+                             centerfns = TRUE)
+{
+  # Realiza un FPCA sin penalización ni suavización
+  
+  # 1. Verificación del objeto
+  if (!(is.fd(fdobj) || is.fdPar(fdobj)))
+    stop("Primer argumento debe ser fd o fdPar.")
+  if (is.fdPar(fdobj)) fdobj <- fdobj$fd
+  
+  # 2. Media y centrado
+  meanfd <- mean.fd(fdobj)
+  if (centerfns) fdobj <- center.fd(fdobj)
+  
+  # 3. Coeficientes y dimensiones
+  coef  <- fdobj$coefs
+  coefd <- dim(coef)
+  ndim  <- length(coefd)
+  nrep  <- coefd[2]
+  coefnames <- dimnames(coef)
+  
+  if (nrep < 2) stop("PCA no posible sin replicaciones.")
+  
+  basisobj <- fdobj$basis
+  nbasis   <- basisobj$nbasis
+  
+  # 4. Base armónica = base original del fdPar
+  harmbasis <- harmfdPar$fd$basis
+  nhbasis   <- harmbasis$nbasis
+  
+  # --- IMPORTANTE:
+  # Eliminamos suavización. Por lo tanto:
+  # L = Psi, donde Psi = <harmbasis, harmbasis>
+  # lambda = 0 siempre.
+  
+  # 5. Matriz L = Psi (sin penalización)
+  # Lmat <- eval.penalty(harmbasis, 0)
+  # Lmat <- (Lmat + t(Lmat)) / 2  # simetrizar
+
+  Lmat = inprod(harmbasis,harmbasis)
+  
+  # 6. Cholesky de L (ortogonalización)
+  Mmat    <- chol(Lmat)
+  Mmatinv <- solve(Mmat)
+  
+  # 7. Matriz de coeficientes concatenada (multi-var)
+  if (ndim == 3) {
+    nvar <- coefd[3]
+    ctemp <- matrix(0, nvar * nbasis, nrep)
+    for(j in 1:nvar) {
+      idx <- 1:nbasis + (j - 1) * nbasis
+      ctemp[idx,] <- coef[,,j]
+    }
+  } else {
+    nvar  <- 1
+    ctemp <- coef
+  }
+  
+  # 8. Covarianza empírica de coeficientes
+  Wmat <- crossprod(t(ctemp)) / nrep
+  
+  # 9. Matriz J = <harmbasis, basisobj>
+  Jmat <- inprod(harmbasis, basisobj)
+  
+  # Transformación MIJW = M^{-1} J
+  MIJW <- crossprod(Mmatinv, Jmat)
+  
+  # 10. Construcción de la matriz de covarianza funcional C
+  if (nvar == 1) {
+    Cmat <- MIJW %*% Wmat %*% t(MIJW)
+  } else {
+    Cmat <- matrix(0, nvar*nhbasis, nvar*nhbasis)
+    for (i in 1:nvar) {
+      indexi <- 1:nbasis + (i - 1) * nbasis
+      for (j in 1:nvar) {
+        indexj <- 1:nbasis + (j - 1) * nbasis
+        Cmat[indexi, indexj] <- MIJW %*% Wmat[indexi,indexj] %*% t(MIJW)
+      }
+    }
+  }
+  
+  # 11. Eigenanálisis
+  Cmat <- (Cmat + t(Cmat))/2
+  result  <- eigen(Cmat)
+  eigvalc <- result$values
+  eigvecc <- as.matrix(result$vectors[, 1:nharm])
+  
+  # signo consistente
+  sumvecc <- apply(eigvecc, 2, sum)
+  eigvecc[, sumvecc < 0] <- -eigvecc[, sumvecc < 0]
+  
+  # proporción de varianza
+  varprop <- eigvalc[1:nharm] / sum(eigvalc)
+  
+  # 12. Coeficientes de las PCs
+  if (nvar == 1) {
+    harmcoef <- Mmatinv %*% eigvecc
+  } else {
+    harmcoef <- array(0, c(nbasis, nharm, nvar))
+    for (j in 1:nvar) {
+      idx <- 1:nbasis + (j - 1) * nbasis
+      temp <- eigvecc[idx,]
+      harmcoef[,,j] <- Mmatinv %*% temp
+    }
+  }
+  
+  # Nombres
+  harmnames <- paste0("PC", 1:nharm)
+  if(length(coefd) == 2)
+    harmnames <- list(coefnames[[1]], harmnames, "values")
+  if(length(coefd) == 3)
+    harmnames <- list(coefnames[[1]], harmnames, coefnames[[3]])
+  
+  harmfd <- fd(harmcoef, harmbasis, harmnames)
+  
+  # 13. Scores
+  if (nvar == 1) {
+    harmscr <- inprod(fdobj, harmfd)
+  } else {
+    harmscr <- array(0, c(nrep, nharm, nvar))
+    coefarray <- fdobj$coefs
+    harmcoefarray <- harmfd$coefs
+    for (j in 1:nvar) {
+      fdj  <- fd(as.matrix(coefarray[,,j]), basisobj)
+      harmj <- fd(as.matrix(harmcoefarray[,,j]), basisobj)
+      harmscr[,,j] <- inprod(fdj, harmj)
+    }
+  }
+  
+  # 14. Armar salida tipo pca.fd
+  pcafd <- list(harmfd, eigvalc, harmscr, varprop, meanfd)
+  class(pcafd) <- "pca.fd"
+  names(pcafd) <- c("harmonics", "values", "scores", "varprop", "meanfd")
+  
+  return(pcafd)
+}
+
 
 #################################### funciones auxiliares para exportar graficos ############################
 
@@ -744,7 +881,7 @@ fpca_Upsilon0 <- function( fd_centered,
   cost_history <- numeric(iterations)
   n        <- nrow(fd_centered$coef)
   ##busco la cantidad de componentes que explican la proporción de varianza indicada
-  fpca_result <- pca.fd(fd_centered, nharm = fd_centered$basis$nbasis, centerfns = TRUE) 
+  fpca_result <- pca.fd.nopenalty (fd_centered, nharm = fd_centered$basis$nbasis, centerfns = TRUE) 
   cum_var <- cumsum(fpca_result$varprop)  
   phi_hat <- fpca_result$harmonics  
   Xi_hat <- fpca_result$scores      
@@ -760,7 +897,7 @@ fpca_Upsilon0 <- function( fd_centered,
   }
   
   
-  fpca_result <- pca.fd(fd_centered, nharm = p, centerfns =  TRUE)
+  fpca_result <- pca.fd.nopenalty (fd_centered, nharm = p, centerfns =  TRUE)
   cum_var <- cumsum(fpca_result$varprop)  
   phi_hat <- fpca_result$harmonics  
   Xi_hat <- fpca_result$scores      
