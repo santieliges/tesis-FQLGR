@@ -571,126 +571,6 @@ resultados_bspline = evaluar_modelos_simulados(3000, c(10,15,30,40,50,60,70,80,9
 ```
 
 
-```{r}
-library(ggplot2)
-
-ggplot(resultados_bspline, aes(x = cond_psi, y = AUC, color = modelo, linetype = escenario)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  theme_minimal() +
-  labs(title = "Evolución de AUC según numero de condición de la gram",
-       x = "Numero de condición de Ψ ", y = "AUC ROC")
-
-ggplot(resultados_bspline, aes(x = cond_psi, y = IMSE_beta, color = modelo, linetype = escenario)) +
-  geom_line(size = 1.2) +
-  theme_minimal() +
-  labs(title = "Evolución del IMSE(β)", x = "Numero de condición de Ψ ", y = "IMSE β")
-
-resultados_bspline$IMSE_beta
-
-ggplot(resultados_bspline, aes(x = cond_psi, y = IMSE_gamma, color = modelo, linetype = escenario)) +
-  geom_line(size = 1.2) +
-  theme_minimal() +
-  labs(title = "Evolución del IMSE(gamma)", x = "Numero de condición de Ψ ", y = "IMSE gamma")
-
-resultados_bspline$IMSE_gamma
-
-ggplot(resultados_bspline, aes(x = cond_psi, y = mse, color = modelo, linetype = escenario)) +
-  geom_line(size = 1.2) +
-  theme_minimal() +
-  labs(title = "Evolución del mse", x = "Numero de condición de Ψ ", y = "MSE")
-
-resultados_bspline$mse
-
-ggplot(resultados_bspline, aes(x = nbasis, y = cond_psi, color = modelo, linetype = escenario)) +
-  geom_line(size = 1.2) +
-  theme_minimal() +
-  labs(title = "Evolución del kappa(psi)", x = "nbasis", y = "Numero de condición de Ψ ")
-
-resultados_bspline$mse
-```
-
-
-```{r}
-resultados_fourier = evaluar_modelos_simulados(3000, c(11,15,31,41,51,61,71,81,91), t_denso = seq(-1, 1, length.out = 2001), t_ligero = seq(-1, 1, length.out = 101), seed = 123, Lcoef = c(3), tipo_basis = "fourier"
-)
-```
-
-```{r}
-library(dplyr)
-
-resultados_fourier <- resultados_fourier %>%
-  mutate(
-    modelo = case_when(
-      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
-      modelo == "fpca_Upsilon0_equivalencia" ~ "Upsilon[Equivalente]^{(0)}",
-      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
-      TRUE ~ modelo
-    )
-  )
-
-save(resultados_fourier, file = "resultados_condgram_simulacion_fourier.RData")
-```
-
-```{r}
-library(ggplot2)
-
-# 1. Crear carpeta si no existe
-carpeta <- "plots/comparacion modelos numero cond fourier"
-if (!dir.exists(carpeta)) {
-  dir.create(carpeta)
-}
-
-# ---- PLOT 1 ----
-p1 <- ggplot(resultados_fourier, aes(x = nbasis, y = AUC, color = modelo)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  theme_minimal() +
-  labs(title = "Evolución de AUC según nbasis",
-       x = "nbasis", y = "AUC ROC")
-
-ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
-       plot = p1, width = 7, height = 5, dpi = 300)
-
-# ---- PLOT 2 ----
-p2 <- ggplot(resultados_fourier, aes(x = cond_psi, y = AUC, color = modelo)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  theme_minimal() +
-  labs(title = "Evolución de AUC según kappa(Psi)",
-       x = "kappa(Psi)", y = "AUC ROC")
-
-ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
-       plot = p2, width = 7, height = 5, dpi = 300)
-
-# ---- PLOT 4 ----
-p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = cond_psi, color = modelo)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  theme_minimal() +
-  labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "kappa(Psi)")
-
-ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
-       plot = p4, width = 7, height = 5, dpi = 300)
-
-# ---- PLOT 5 ----
-p5 <- ggplot(resultados_fourier, aes(x = cond_psi, y = mse, color = modelo)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  theme_minimal() +
-  labs(title = "Evolución de kappa(Psi) según mse",
-       x = "kappa(Psi)", y = "mse")
-
-ggsave(filename = file.path(carpeta, "msevskappa(psi).png"),
-       plot = p5, width = 7, height = 5, dpi = 300)
-```
-
-
 
 
 ```{r}
@@ -719,29 +599,6 @@ if (!dir.exists(carpeta)) {
 }
 
 resultados_bspline$base <- "bspline"
-resultados_fourier$base <- "fourier"
-
-# Combinar en un único dataframe
-resultados_total <- rbind(resultados_bspline, resultados_fourier)
-
-p_comb <- ggplot(resultados_total,
-                 aes(x = nbasis,
-                     y = AUC,
-                     color = modelo,
-                     linetype = escenario)) +
-  geom_line(size = 1.2) +
-  geom_point(size = 2) +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  scale_linetype_manual(values = c("bspline" = "solid",
-                                   "fourier" = "dashed")) +
-  theme_minimal() +
-  labs(title = "Evolución de AUC según nbasis",
-       x = "nbasis",
-       y = "AUC ROC",
-       linetype = "Base funcional")
-
-ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
-       plot = p_comb, width = 7, height = 5, dpi = 300)
 
 
 p1 <- ggplot(resultados_bspline, aes(x = nbasis, y = AUC, color = modelo ,linetype = escenario)) +
@@ -759,20 +616,44 @@ ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p1, width = 7, height = 5, dpi = 300)
 
 # ---- PLOT 2 ----
-p2 <- ggplot(resultados_bspline, aes(x = cond_psi, y = AUC, color = modelo,linetype = escenario)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  theme_minimal() +
-  labs(
-    title = expression("Evolución de AUC según " * kappa(Psi)),
-    x = expression(kappa(Psi)),
-    y = "AUC ROC"
-  )
+library(ggplot2)
+library(dplyr)
 
-ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
-       plot = p2, width = 7, height = 5, dpi = 300)
+# Obtener los nombres únicos de los escenarios
+escenarios_unicos <- unique(resultados_bspline$escenario)
 
+# Iterar sobre cada escenario único y generar un plot
+for (escenario_actual in escenarios_unicos) {
+  
+  # 1. Filtrar los datos para el escenario actual
+  datos_filtrados <- resultados_bspline %>%
+    filter(escenario == escenario_actual)
+  
+  # 2. Generar el plot
+  p_escenario <- ggplot(datos_filtrados, aes(x = cond_psi, y = AUC, color = modelo)) +
+    geom_line(size = 1.2) +
+    geom_point() +
+    # Usamos scale_color_discrete para interpretar las etiquetas de los modelos
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    theme_minimal() +
+    labs(
+      # Título adaptado para incluir el nombre del escenario
+      title = expression(paste("Evolución de AUC según ", kappa(Psi), " - Escenario: ", escenario_actual)),
+      x = expression(kappa(Psi)),
+      y = "AUC ROC",
+      color = "Modelo"
+    )
+  
+  # 3. Guardar el plot con un nombre de archivo específico para el escenario
+  # Se reemplaza ' ' y otros caracteres especiales en el nombre del escenario para el archivo
+  nombre_base <- gsub("[^[:alnum:]]", "_", escenario_actual)
+  nombre_archivo <- paste0("AUC_vs_cond_psi_", nombre_base, ".png")
+  
+  ggsave(filename = file.path(carpeta, nombre_archivo),
+         plot = p_escenario, width = 7, height = 5, dpi = 300)
+  
+  cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
+}
 # ---- PLOT 4 ----
 p4 <- ggplot(resultados_bspline, aes(x = nbasis, y = cond_psi, color = modelo ,linetype = escenario)) +
   geom_line(size = 1.2) +
@@ -786,20 +667,42 @@ ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
 
 # ---- PLOT 5 ----
-p5 <- ggplot(resultados_bspline, aes(x = cond_psi, y = mse, color = modelo ,linetype = escenario)) +
-  geom_line(size = 1.2) +
-  geom_point() +
-  scale_color_discrete(labels = function(x) parse(text = x)) +
-  theme_minimal() +
-  labs(
-    title = expression("Evolución de AUC según " * kappa(Psi)),
-    x = expression(kappa(Psi)),
-    y = "AUC ROC"
-  )
+library(ggplot2)
+library(dplyr)
 
-ggsave(filename = file.path(carpeta, "msevskappa(psi).png"),
-       plot = p5, width = 7, height = 5, dpi = 300)
+# Obtener los nombres únicos de los escenarios
+escenarios_unicos <- unique(resultados_bspline$escenario)
 
+# Iterar sobre cada escenario único y generar un plot
+for (escenario_actual in escenarios_unicos) {
+  
+  # 1. Filtrar los datos para el escenario actual
+  datos_filtrados <- resultados_bspline %>%
+    filter(escenario == escenario_actual)
+  
+  # 2. Generar el plot (similar a tu código original, pero sin 'linetype = escenario')
+  p_escenario <- ggplot(datos_filtrados, aes(x = cond_psi, y = mse, color = modelo)) +
+    geom_line(size = 1.2) +
+    geom_point() +
+    # Usamos scale_color_discrete para interpretar las etiquetas de los modelos
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    theme_minimal() +
+    labs(
+      # Título adaptado para incluir el nombre del escenario
+      title = expression(paste("Evolución de AUC según ", kappa(Psi), " - Escenario: ", escenario_actual)),
+      x = expression(kappa(Psi)),
+      y = "AUC ROC",
+      color = "Modelo"
+    )
+  
+  # 3. Guardar el plot con un nombre de archivo específico para el escenario
+  nombre_archivo <- paste0("msevskappa(psi)_", escenario_actual, ".png")
+  
+  ggsave(filename = file.path(carpeta, nombre_archivo),
+         plot = p_escenario, width = 7, height = 5, dpi = 300)
+  
+  cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
+}
 # ---- PLOT 6 ----
 p6 <- ggplot(resultados_bspline, aes(x = nbasis, y = mse, color = modelo ,linetype = escenario)) +
   geom_line(size = 1.2) +
@@ -815,6 +718,160 @@ p6 <- ggplot(resultados_bspline, aes(x = nbasis, y = mse, color = modelo ,linety
 ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
        plot = p6, width = 7, height = 5, dpi = 300)
 ```
+
+
+```{r}
+resultados_fourier = evaluar_modelos_simulados(3000, c(11,15,31,41,51,61,71,81,91), t = seq(-1, 1, length.out = 301), seed = 123, Lcoef = c(3), tipo_basis = "fourier"
+)
+```
+
+```{r}
+library(dplyr)
+
+resultados_fourier <- resultados_fourier %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0_equivalencia" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+save(resultados_fourier, file = "resultados_condgram_simulacion_fourier.RData")
+```
+
+```{r}
+library(ggplot2)
+
+# 1. Crear carpeta si no existe
+carpeta <- "plots/comparacion modelos numero cond fourier"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+library(ggplot2)
+
+p1 <- ggplot(resultados_bspline, aes(x = nbasis, y = AUC, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de AUC según nbasis"),
+    x = "nbasis",
+    y = "AUC ROC"
+  )
+
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+library(ggplot2)
+library(dplyr)
+
+# Obtener los nombres únicos de los escenarios
+escenarios_unicos <- unique(resultados_fourier$escenario)
+
+# Iterar sobre cada escenario único y generar un plot
+for (escenario_actual in escenarios_unicos) {
+  
+  # 1. Filtrar los datos para el escenario actual
+  datos_filtrados <- resultados_fourier %>%
+    filter(escenario == escenario_actual)
+  
+  # 2. Generar el plot
+  p_escenario <- ggplot(datos_filtrados, aes(x = cond_psi, y = AUC, color = modelo)) +
+    geom_line(size = 1.2) +
+    geom_point() +
+    # Usamos scale_color_discrete para interpretar las etiquetas de los modelos
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    theme_minimal() +
+    labs(
+      # Título adaptado para incluir el nombre del escenario
+      title = expression(paste("Evolución de AUC según ", kappa(Psi), " - Escenario: ", escenario_actual)),
+      x = expression(kappa(Psi)),
+      y = "AUC ROC",
+      color = "Modelo"
+    )
+  
+  # 3. Guardar el plot con un nombre de archivo específico para el escenario
+  # Se reemplaza ' ' y otros caracteres especiales en el nombre del escenario para el archivo
+  nombre_base <- gsub("[^[:alnum:]]", "_", escenario_actual)
+  nombre_archivo <- paste0("AUC_vs_cond_psi_", nombre_base, ".png")
+  
+  ggsave(filename = file.path(carpeta, nombre_archivo),
+         plot = p_escenario, width = 7, height = 5, dpi = 300)
+  
+  cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
+}
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = cond_psi, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "kappa(Psi)")
+
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 5 ----
+library(ggplot2)
+library(dplyr)
+
+# Obtener los nombres únicos de los escenarios
+escenarios_unicos <- unique(resultados_fourier$escenario)
+
+# Iterar sobre cada escenario único y generar un plot
+for (escenario_actual in escenarios_unicos) {
+  
+  # 1. Filtrar los datos para el escenario actual
+  datos_filtrados <- resultados_fourier %>%
+    filter(escenario == escenario_actual)
+  
+  # 2. Generar el plot (similar a tu código original, pero sin 'linetype = escenario')
+  p_escenario <- ggplot(datos_filtrados, aes(x = cond_psi, y = mse, color = modelo)) +
+    geom_line(size = 1.2) +
+    geom_point() +
+    # Usamos scale_color_discrete para interpretar las etiquetas de los modelos
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    theme_minimal() +
+    labs(
+      # Título adaptado para incluir el nombre del escenario
+      title = expression(paste("Evolución de AUC según ", kappa(Psi), " - Escenario: ", escenario_actual)),
+      x = expression(kappa(Psi)),
+      y = "AUC ROC",
+      color = "Modelo"
+    )
+  
+  # 3. Guardar el plot con un nombre de archivo específico para el escenario
+  nombre_archivo <- paste0("msevskappa(psi)_", escenario_actual, ".png")
+  
+  ggsave(filename = file.path(carpeta, nombre_archivo),
+         plot = p_escenario, width = 7, height = 5, dpi = 300)
+  
+  cat("Gráfico guardado para el escenario:", escenario_actual, "\n")
+}
+# ---- PLOT 6 ----
+p6 <- ggplot(resultados_fourier, aes(x = nbasis, y = mse, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de MSE según nbasis"),
+    x =  "nbasis",
+    y = "mse"
+  )
+
+ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
+       plot = p6, width = 7, height = 5, dpi = 300)
+```
+
+
+
 
 
 
