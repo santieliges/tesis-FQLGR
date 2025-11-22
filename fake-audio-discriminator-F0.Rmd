@@ -42,24 +42,24 @@ library(seewave)
 library(ggplot2)
 library(gridExtra)
 library(dplyr)
-
-# --- Definir rutas ---
-carpeta_training_fake <- '../archive/archive/for-norm/for-norm/training/fake'
-carpeta_training_real <- '../archive/archive/for-norm/for-norm/training/real'
-
-# --- Definir rutas ---
-carpeta_testing_fake <- '../archive/archive/for-norm/for-norm/testing/fake'
-carpeta_testing_real <- '../archive/archive/for-norm/for-norm/testing/real'
-
-# --- Listar archivos de audio ---
-archivos_fake <- list.files(carpeta_training_fake,  full.names = TRUE)
-archivos_real <- list.files(carpeta_training_real,  full.names = TRUE)
-archivos_testing_fake <- list.files(carpeta_testing_fake, full.names = TRUE)
-archivos_testing_real <- list.files(carpeta_testing_real, full.names = TRUE)
-# --- Seleccionar ejemplos al azar ---
-set.seed(123)
-muestras_fake <- sample(archivos_fake, 3)
-muestras_real <- sample(archivos_real, 3)
+# 
+# # --- Definir rutas ---
+# carpeta_training_fake <- 'archive/archive/for-norm/for-norm/training/fake'
+# carpeta_training_real <- 'archive/archive/for-norm/for-norm/training/real'
+# 
+# # --- Definir rutas ---
+# carpeta_testing_fake <- './archive/archive/for-norm/for-norm/testing/fake'
+# carpeta_testing_real <- './archive/archive/for-norm/for-norm/testing/real'
+# 
+# # --- Listar archivos de audio ---
+# archivos_fake <- list.files(carpeta_training_fake,  full.names = TRUE)
+# archivos_real <- list.files(carpeta_training_real,  full.names = TRUE)
+# archivos_testing_fake <- list.files(carpeta_testing_fake, full.names = TRUE)
+# archivos_testing_real <- list.files(carpeta_testing_real, full.names = TRUE)
+# # --- Seleccionar ejemplos al azar ---
+# set.seed(123)
+# muestras_fake <- sample(archivos_fake, 3)
+# muestras_real <- sample(archivos_real, 3)
 
 # --- Función para graficar la F0 ---
 graficar_F0 <- function(archivo, clase) {
@@ -173,19 +173,6 @@ procesar_carpeta_F0_fixed <- function(archivos_wav, n_points = 512, fmax = 500) 
   return(df)
 }
 
-#--------------------------------------------------------------
-# 🔹 Ejemplo de uso en dataset de entrenamiento y test
-#--------------------------------------------------------------
-
-archivos_fake <- list.files(carpeta_training_fake,  full.names = TRUE)
-archivos_real <- list.files(carpeta_training_real,  full.names = TRUE)
-
-
-archivos_training <- c(
-  archivos_fake,
-  archivos_real
-)
-
 
 #--------------------------------------------------------------
 # 🔹 Carga o generación de datos preprocesados
@@ -276,7 +263,7 @@ freq_range <- c(1, 1024)
 # Parámetros de la base B-spline
 nbasis <- 80
 norder <- 5
-Lcoef <- c(3)
+Lcoef <- c(2)
 harmacclLdf <- vec2Lfd(Lcoef, freq_range)
 
 # -----
@@ -354,7 +341,7 @@ modelo_fpca <- fpca_Upsilon0(
     alpha  = alpha_init,
     step_gradient = 0.001,
     iterations = 15000,
-    var_threshold = 0.8,
+    var_threshold = 0.9,
     tol = 1e-10,
     basis = estimationBasis,
     LdPenalization = harmacclLdf,
@@ -388,9 +375,36 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,y = Y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.002, iterations = 8000, var_threshold = 0.8, LdPenalization = 2, lambda_lin = 0, lambda_quad = 1e-3, modelo_quad = FALSE)
+res_pca_noquad <- pca_coef_Upsilon1(
+  fd_centered = fd_train_centered,
+  y = Y_train, 
+  beta = beta_init,
+  gamma = gamma_init, 
+  alpha = alpha_init,
+  basis = estimationBasis,
+  step_gradient = 0.002,
+  iterations = 8000,
+  var_threshold = 0.8, 
+  LdPenalization = 2, 
+  lambda_lin = 0, 
+  lambda_quad = 1e-3, 
+  modelo_quad = FALSE)
 
-res_pca <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = Y_train, beta = res_pca_noquad$beta, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 20000, var_threshold = 0.9, LdPenalization = 2, lambda_lin = 0, lambda_quad = 0, tol = 1e-9, scale =  FALSE)
+res_pca <- pca_coef_Upsilon1(
+  fd_centered = fd_train_centered,
+  y = Y_train,
+  beta = res_pca_noquad$beta,
+  gamma = gamma_init, 
+  alpha = alpha_init, 
+  basis = estimationBasis, 
+  step_gradient = 0.001, 
+  iterations = 20000,
+  var_threshold = 0.9, 
+  LdPenalization = 2,
+  lambda_lin = 0, 
+  lambda_quad = 0,
+  tol = 1e-9, 
+  scale =  FALSE)
  
 
  
@@ -728,7 +742,7 @@ for (nm in nombres) {
 
 
 ```{r}
-nbasises = c(10,30,50,70,90,110)
+nbasises = c(10,30,50,70,90,150,250,400,600)
 basises <- list()
 for (nbasis in nbasises) {
   basises[[length(basises)+1]] <- create.bspline.basis(rangeval = freq_range, nbasis = nbasis)
@@ -756,7 +770,7 @@ params_Upsilon1 <- list(
     var_threshold = 0.9,
     modelo_quad = TRUE
 )
-resultados = evaluar_modelos_distintas_bases(
+resultados_f0 = evaluar_modelos_distintas_bases(
                                         data = list(X_train = X_train, 
                                                           X_valid = X_valid,
                                                           y_train = Y_train,
@@ -770,16 +784,159 @@ resultados = evaluar_modelos_distintas_bases(
 
 
 ```
+```{r}
+save(resultados_f0, file = "resultados_condgram_f0.RData")
+
+save(
+  modelo_fpca,
+  modelo_fpca_lin,
+  res_pca_noquad,
+  res_pca,
+  res_plsr_quad,
+  res_plsr_noquad,
+  res_plsr_2,
+  res_nopca,
+  file = "modelos_F0.RData"
+)
+
+```
+
+
+```{r}
+library(dplyr)
+
+resultados_f0 <- resultados_f0 %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0.2_equivalente" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+save(resultados_f0, file = "resultados_condgram_f0.RData")
+
+```
 
 ```{r}
 library(ggplot2)
 
-ggplot(resultados, aes(x = nbasis, y = AUC, color = modelo)) +
+# 1. Crear carpeta si no existe
+carpeta <- "plots_f0_fakeaudio/comparacion modelos numero cond f0"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+# ---- PLOT 1 ----
+p1 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = AUC, color = modelo)) +
   geom_line(size = 1.2) +
   geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
        x = "nbasis", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+p2 <- ggplot(resultados_cardiotox, aes(x = cond_psi, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_psi",
+       x = "cond_psi", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
+       plot = p2, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 3 ----
+p3 <- ggplot(resultados_cardiotox, aes(x = cond_var_fd, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_var_fd",
+       x = "cond_var_fd", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_var_fd.png"),
+       plot = p3, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_psi, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "cond_psi")
+
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 5 ----
+p5 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_var_fd según nbasis",
+       x = "nbasis", y = "cond_var_fd")
+
+ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
+       plot = p5, width = 7, height = 5, dpi = 300)
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(resultados_f0, aes(x = nbasis, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+      scale_color_discrete(labels = function(x) parse(text = x)) +
+
+  theme_minimal() +
+  labs(title = "Evolución de AUC según nbasis",
+       x = "nbasis", y = "AUC ROC")
+
+ggplot(resultados_f0, aes(x = log(cond_psi), y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+      scale_color_discrete(labels = function(x) parse(text = x)) +
+
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_psi",
+       x = "cond_psi", y = "AUC ROC")
+
+ggplot(resultados_f0, aes(x = cond_var_fd, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+      scale_color_discrete(labels = function(x) parse(text = x)) +
+
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_var_fd",
+       x = "cond_var_fd", y = "AUC ROC")
+
+ggplot(resultados_f0, aes(x = nbasis, y = log(cond_psi), color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+      scale_color_discrete(labels = function(x) parse(text = x)) +
+
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "cond_psi")
+
+ggplot(resultados_f0, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  theme_minimal() +
+      scale_color_discrete(labels = function(x) parse(text = x)) +
+
+  labs(title = "Evolución de cond_var_fd según nbasis",
+       x = "nbasis", y = "cond_var_fd")
 
 ```
 

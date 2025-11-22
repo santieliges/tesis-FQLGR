@@ -172,29 +172,75 @@ balance_alpha <- function(fd_centered, psi, coef_beta, coef_gamma, target = 0.5)
     probs <- predict_log_func(fd_centered, psi, coef_beta, coef_gamma, alpha)
     mean(probs) - target
   }
-  uniroot(f, c(-50, 50))$root
+  uniroot(f, c(-1e4, 1e4))$root
 }
 ```
 
 
 ```{r}
-simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
+simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123,
+                                      tipo_basis = "bspline",
+                                      escenario = c("ligero", "denso")) {
   library(fda)
   library(MASS)
   
+  escenario <- match.arg(escenario)
   set.seed(seed)
   rangeval <- range(t)
+
+  # ================================
+  # 1. Selección de base por parámetro
+  # ================================
+  if (tipo_basis == "bspline") {
+    
+    if (escenario == "ligero") {
+      # ------------------------------
+      # ESCENARIO LIGERO:
+      # = mantener fijo el número de nudos
+      # = aumentar norder según nbasis
+      # ------------------------------
+
+      # Definición del orden para respetar nbasis:
+      # nbasis = length(knots) + norder - 2
+      norder <- min(nbasis - length(knots) + 2, 10)
+      if (norder < 2) stop("norder quedó < 2, aumentar num_knots o nbasis.")
+
+      basis <- create.bspline.basis(
+        rangeval = rangeval,
+        norder = norder,
+        nbasis = nbasis
+      )
+
+    } else if (escenario == "denso") {
+      # ------------------------------
+      # ESCENARIO DENSO:
+      # = mantener norder fijo
+      # = aumentar cantidad de nudos según nbasis
+      # ------------------------------
+      norder <- 4  # spline cúbico fijo
+      num_knots <- nbasis - norder + 2
+      knots <- seq(rangeval[1], rangeval[2], length.out = num_knots)
+
+      basis <- create.bspline.basis(
+        rangeval = rangeval,
+        norder = norder,
+        breaks = knots,
+        nbasis = nbasis
+      )
+    }
+    
+  } else if (tipo_basis == "fourier") {
+    
+    basis <- create.fourier.basis(
+      rangeval = rangeval,
+      nbasis = nbasis
+    )
+    
+  } else {
+    stop("tipo_basis debe ser 'bspline' o 'fourier'")
+  }
   
-  # ================================
-  # 1. Base B-spline
-  # ================================
-  internal_breaks <- seq(rangeval[1], rangeval[2], length.out = nbasis - 1)
-  basis <- create.bspline.basis(
-    rangeval = rangeval,
-    breaks = internal_breaks,
-    nbasis = nbasis,
-    norder = nbasis + 2 - length(internal_breaks)
-  )
+
   
   # ================================
   # 2. Coeficientes correlacionados (AR(1))
@@ -207,22 +253,23 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
   coef <- mvrnorm(n, mu = mean_coef, Sigma = Sigma)
   fd_obj <- fd(coef = t(coef), basisobj = basis)
   
-  
   # ================================
-  # 3. Coeficientes verdaderos (β(t), γ(s,t))
+  # 3. Verdaderos coeficientes β(t) y γ(s,t)
   # ================================
   s <- t
+  
   beta <- 2 * sin(2 * pi * t) + 0.5 * cos(4 * pi * t)
   matriz_beta <- beta / max(abs(beta))
   
   Sigma_gamma <- 0.6
   matriz_gamma <- outer(s, t, function(s, t) {
-    exp(-((s - t)^2) / (2 * Sigma_gamma^2)) + 0.5 * sin(pi * s) * sin(pi * t)
+    exp(-((s - t)^2) / (2 * Sigma_gamma^2)) + 
+      0.5 * sin(pi * s) * sin(pi * t)
   })
   matriz_gamma <- (matriz_gamma + t(matriz_gamma)) / 2
   
   # ================================
-  # 4. Proyección sobre base B-spline
+  # 4. Proyección sobre la base elegida
   # ================================
   fd_beta <- Data2fd(argvals = t, y = matriz_beta, basisobj = basis)
   coef_beta <- fd_beta$coefs
@@ -234,32 +281,32 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
   G_s <- t(Phi_s) %*% Phi_s
   G_t <- t(Phi_t) %*% Phi_t
   
+  # Resolver (regularizado si fuera necesario)
   A_est <- solve(G_s) %*% A %*% solve(G_t)
   coef_gamma <- (A_est + t(A_est)) / 2
   
   gamma_recon <- Phi_s %*% A_est %*% t(Phi_t)
   
   # ================================
-  # 5. División en entrenamiento/validación
+  # 5. División Train/Valid
   # ================================
   psi <- inprod(basis, basis)
+  
   idx_train <- sample(1:n, size = floor(0.7 * n))
   idx_valid <- setdiff(1:n, idx_train)
   
   fd_train <- fd(fd_obj$coefs[, idx_train], basis)
-  fd_train = center.fd(fd_train)
-  center_fd_train = mean.fd(fd_train)
+  fd_train <- center.fd(fd_train)
+  center_fd_train <- mean.fd(fd_train)
+  
   fd_valid <- fd(fd_obj$coefs[, idx_valid], basis)
-  fd_valid$coefs = fd_valid$coefs - as.vector(center_fd_train$coefs)
+  fd_valid$coefs <- fd_valid$coefs - as.vector(center_fd_train$coefs)
   
-  # =================================
-  # 5.prediccion
-  #======================
-  
-  set.seed(123)
-
+  # ================================
+  # 5. Generación de etiquetas
+  # ================================
   alpha_true <- balance_alpha(center.fd(fd_obj), psi, coef_beta, coef_gamma)
-
+  
   prob_total <- predict_log_func(center.fd(fd_obj), psi, coef_beta, coef_gamma, alpha_true)
   y_total <- pred_mod_log_func(prob_total)
   
@@ -273,8 +320,8 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
     t = t,
     s = s,
     basis = basis,
+    tipo_basis = tipo_basis,
     fd_obj = fd_obj,
-    fd_centered = fd_centered,
     coef = coef,
     alpha = alpha_true,
     coef_beta = coef_beta,
@@ -292,11 +339,14 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
     psi = psi
   ))
 }
+
 ```
 
 ```{r}
-    escenario_denso   <- simular_datos_funcionales(seq(-1, 1, length.out = 101), 3000, nbasis = 15, seed = 123)
-    escenario_ligero  <- simular_datos_funcionales(seq(-1, 1, length.out = 2001), 3000, nbasis = 15, seed = 123)
+    escenario_denso   <- simular_datos_funcionales(seq(-1, 1, length.out = 201), 3000, nbasis = 100, seed = 123, escenario = "denso")
+    escenario_ligero  <- simular_datos_funcionales(seq(-1, 1, length.out = 201), 3000, nbasis = 100, seed = 123, escenario = "ligero")
+    
+   
     
 ```
 
@@ -304,10 +354,10 @@ simular_datos_funcionales <- function(t, n = 3000, nbasis = 50, seed = 123) {
 ```{r}
 evaluar_modelos_simulados <- function(n = 3000,
                                       nbasis_grid = c(30, 50, 70),
-                                      t_denso,
-                                      t_ligero,
+                                      t,
                                       seed = 123,
-                                      Lcoef = 2) {
+                                      Lcoef = 2,
+                                      tipo_basis="bspline") {
   library(pROC)
   resultados <- data.frame()
   
@@ -317,8 +367,8 @@ evaluar_modelos_simulados <- function(n = 3000,
     cat("====================================\n")
     
     # 1. Simulación densa y ligera
-    escenario_denso   <- simular_datos_funcionales(t_denso, n, nbasis = nbasis, seed = seed)
-    escenario_ligero  <- simular_datos_funcionales(t_ligero, n, nbasis = nbasis, seed = seed)
+    escenario_denso   <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "denso")
+    escenario_ligero  <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "ligero")
     
     for (escenario_nombre in c("denso", "ligero")) {
       escenario <- if (escenario_nombre == "denso") escenario_denso else escenario_ligero
@@ -328,12 +378,15 @@ evaluar_modelos_simulados <- function(n = 3000,
       fd_train <- escenario$fd_train
       fd_valid <- escenario$fd_valid
       y_valid <- escenario$y_valid
-      print(y_valid)
       y_train <- escenario$y_train
-      print(y_train)
       matriz_beta <- escenario$matriz_beta
       matriz_gamma <- escenario$matriz_gamma
-    
+      
+      psi = inprod(fd_train$basis, fd_train$basis)
+      cond_psi <- kappa(psi)
+      var_fd_train <- var.fd(fd_train)
+      eval_var_fd_train <- eval.bifd(t,t,var_fd_train)
+      cond_var_fd_train <- kappa(eval_var_fd_train)
       harmacclLdf <- vec2Lfd(Lcoef, range(t))
       
       # =======================
@@ -350,8 +403,8 @@ evaluar_modelos_simulados <- function(n = 3000,
         alpha = 0,
         step_gradient = 0.005,
         iterations = 15000,
-        var_threshold = 0.7,
-        tol = 1e-8,
+        var_threshold = 0.8,
+        tol = 1e-9,
         basis = basis,
         LdPenalization = harmacclLdf,
         lambda_lin = 1e-4,
@@ -360,7 +413,13 @@ evaluar_modelos_simulados <- function(n = 3000,
 
       )
       
-      modelo_fpca_lin <- fpca_Upsilon0(
+      # =======================
+      # Modelos FPCA equiv (Upsilon02)
+      # =======================
+      beta_init <- rnorm(nbasis, sd = 0.1)
+      gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+      
+      modelo_fpca_equiv <- fpca_upsilon0_equiv(
         fd_centered = fd_train,
         y = y_train,
         beta = beta_init,
@@ -368,13 +427,12 @@ evaluar_modelos_simulados <- function(n = 3000,
         alpha = 0,
         step_gradient = 0.005,
         iterations = 15000,
-        var_threshold = 0.7,
-        tol = 1e-8,
+        var_threshold = 0.8,
+        tol = 1e-9,
         basis = basis,
         LdPenalization = harmacclLdf,
         lambda_lin = 1e-4,
         lambda_quad = 0,
-        modelo_quad = FALSE,
                 verbose = FALSE
 
       )
@@ -390,33 +448,16 @@ evaluar_modelos_simulados <- function(n = 3000,
         alpha = 0,
         step_gradient = 0.005,
         iterations = 10000,
-        var_threshold = 0.7,
-        tol = 1e-8,
+        var_threshold = 0.8,
+        tol = 1e-9,
         basis = basis,
         LdPenalization = harmacclLdf,
-        lambda_lin = 0,
-        lambda_quad = 0,
+        lambda_lin = 1e-3,
+        lambda_quad = 1e-3,
                 verbose = FALSE
 
       )
       
-      res_pca_noquad <- pca_coef_Upsilon1(
-        fd_centered = fd_train,
-        y = y_train,
-        beta = beta_init,
-        gamma = gamma_init,
-        alpha = 0,
-        step_gradient = 0.005,
-        iterations = 10000,
-        var_threshold = 0.7,
-        basis = basis,
-        tol = 1e-8,
-        LdPenalization = harmacclLdf,
-        lambda_lin = 0,
-        lambda_quad = 0,
-        modelo_quad = FALSE,
-        verbose = FALSE
-      )
       
       # =======================
       # Cálculo de métricas IMSE
@@ -429,16 +470,23 @@ evaluar_modelos_simulados <- function(n = 3000,
       
       imseb_beta_fpca <- IMSEB_integral(beta_est_pca_quad, matriz_beta, t)
       imseb_gamma_fpca <- IMBSEB(matriz_gamma, gamma_est_pca_quad, t, t)
-      psi = inprod(fd_train$basis, fd_train$basis)
-      cond_psi <- kappa(psi)
 
-    eig <- eigen(psi)
-    psi_half <- eig$vectors %*% diag(sqrt(eig$values)) %*% t(eig$vectors)
+
+    psi_half <- Psi_half(psi)
     matriz_diseño_fpca <- t(fd_train$coefs) %*% psi_half
     pca_fpca <- prcomp(matriz_diseño_fpca)
-    beta_est_fpca <- pca_fpca$rotation[,1:modelo_fpca$K] %*% modelo_fpca$beta
+
+    beta_est_fpca <- as.matrix(pca_fpca$rotation[,1:modelo_fpca$K]) %*% as.vector(modelo_fpca$beta)
     gamma_est_fpca <- pca_fpca$rotation[,1:modelo_fpca$K] %*% modelo_fpca$gamma %*% t(pca_fpca$rotation[,1:modelo_fpca$K])
     mse_fpca <- MSEB(escenario$alpha, modelo_fpca$alpha, escenario$coef_beta, beta_est_fpca, escenario$coef_gamma, gamma_est_fpca)
+    
+      # Upsilon0 equiv
+      beta_est_fpca_equiv <- fd(coef = modelo_fpca_equiv$beta, basisobj = basis)
+      imseb_beta_fpca_equiv <- IMSEB_integral(eval.fd(fdobj = beta_est_fpca_equiv, evalarg = t), matriz_beta, t)
+      evalbasis <- eval.basis(t, basis)
+      gamma_est_matriz <- evalbasis %*% modelo_fpca_equiv$gamma %*% t(evalbasis)
+      imseb_gamma_fpca_equiv <- IMBSEB(matriz_gamma, gamma_est_matriz, t, t)
+      mse_fpca_equiv = MSEB(alpha_true = escenario$alpha, alpha_hat = modelo_fpca$alpha, beta_true = escenario$coef_beta, beta_hat = modelo_fpca_equiv$beta, gamma_true = escenario$coef_gamma, gamma_hat = modelo_fpca_equiv$gamma)
       
       # Upsilon1
       beta_est_fd <- fd(coef = res_pca_quad$beta, basisobj = basis)
@@ -446,7 +494,6 @@ evaluar_modelos_simulados <- function(n = 3000,
       evalbasis <- eval.basis(t, basis)
       gamma_est_matriz <- evalbasis %*% res_pca_quad$gamma %*% t(evalbasis)
       imseb_gamma_pca <- IMBSEB(matriz_gamma, gamma_est_matriz, t, t)
-      print(escenario$alpha)
       mse_pca = MSEB(alpha_true = escenario$alpha, alpha_hat = modelo_fpca$alpha, beta_true = escenario$coef_beta, beta_hat = res_pca_quad$beta, gamma_true = escenario$coef_gamma, gamma_hat = res_pca_quad$gamma)
       # =======================
       # AUC ROC
@@ -454,21 +501,17 @@ evaluar_modelos_simulados <- function(n = 3000,
       y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(
         modelo_fpca, fd_valid, modelo_fpca$fpca_model$harmonics
       )
-      y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(
-        modelo_fpca_lin, fd_valid, modelo_fpca_lin$fpca_model$harmonics
+      y_prob_valid_base_fpca_equiv <- predecir_probabilidades_validacion(
+        modelo_fpca_equiv, fd_valid, basis, modo = "PCA"
       )
       y_prob_valid_pca <- predecir_probabilidades_validacion(
         res_pca_quad, fd_valid, basis, modo = "PCA"
       )
-      y_prob_valid_pca_noquad <- predecir_probabilidades_validacion(
-        res_pca_noquad, fd_valid, basis, modo = "PCA"
-      )
-      
+
       auc_base_fpca <- auc(roc(response = y_valid, predictor = y_prob_valid_base_fpca))
-      auc_base_fpca_noquad <- auc(roc(response = y_valid, predictor = y_prob_valid_base_fpca_noquad))
+      auc_base_fpca_equiv <- auc(roc(response = y_valid, predictor = y_prob_valid_base_fpca_equiv))
       auc_pca <- auc(roc(response = y_valid, predictor = y_prob_valid_pca))
-      auc_pca_noquad <- auc(roc(response = y_valid, predictor = y_prob_valid_pca_noquad))
-      
+
       # =======================
       # Guardar resultados
       # =======================
@@ -482,7 +525,21 @@ evaluar_modelos_simulados <- function(n = 3000,
           IMSE_beta = imseb_beta_fpca,
           IMSE_gamma = imseb_gamma_fpca,
           mse = mse_fpca,
-          cond_psi = cond_psi
+          cond_psi = cond_psi,
+          cond_var_fd = cond_var_fd_train
+        ),
+        data.frame(
+          escenario = escenario_nombre,
+          nbasis = nbasis,
+          modelo = "fpca_Upsilon0_equivalencia",
+          cuadratico = TRUE,
+          AUC = auc_base_fpca_equiv,
+          IMSE_beta = imseb_beta_fpca_equiv,
+          IMSE_gamma = imseb_gamma_fpca_equiv,
+          mse = mse_fpca_equiv,
+          cond_psi = cond_psi,
+                    cond_var_fd = cond_var_fd_train
+
         ),
         data.frame(
           escenario = escenario_nombre,
@@ -493,7 +550,9 @@ evaluar_modelos_simulados <- function(n = 3000,
           IMSE_beta = imseb_beta_pca,
           IMSE_gamma = imseb_gamma_pca,
           mse = mse_pca,
-          cond_psi = cond_psi
+          cond_psi = cond_psi,
+                    cond_var_fd = cond_var_fd_train
+
         )
       )
     }
@@ -504,8 +563,10 @@ evaluar_modelos_simulados <- function(n = 3000,
 
 ```
 
+
+
 ```{r}
-resultados = evaluar_modelos_simulados(3000, c(10,15,30,50,80,100), t_denso = seq(-1, 1, length.out = 2001), t_ligero = seq(-1, 1, length.out = 101), seed = 123, Lcoef = c(3)
+resultados_bspline = evaluar_modelos_simulados(3000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(3)
 )
 ```
 
@@ -513,39 +574,247 @@ resultados = evaluar_modelos_simulados(3000, c(10,15,30,50,80,100), t_denso = se
 ```{r}
 library(ggplot2)
 
-ggplot(resultados, aes(x = nbasis, y = AUC, color = modelo, linetype = escenario)) +
+ggplot(resultados_bspline, aes(x = cond_psi, y = AUC, color = modelo, linetype = escenario)) +
   geom_line(size = 1.2) +
   geom_point() +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según numero de condición de la gram",
+       x = "Numero de condición de Ψ ", y = "AUC ROC")
+
+ggplot(resultados_bspline, aes(x = cond_psi, y = IMSE_beta, color = modelo, linetype = escenario)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Evolución del IMSE(β)", x = "Numero de condición de Ψ ", y = "IMSE β")
+
+resultados_bspline$IMSE_beta
+
+ggplot(resultados_bspline, aes(x = cond_psi, y = IMSE_gamma, color = modelo, linetype = escenario)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Evolución del IMSE(gamma)", x = "Numero de condición de Ψ ", y = "IMSE gamma")
+
+resultados_bspline$IMSE_gamma
+
+ggplot(resultados_bspline, aes(x = cond_psi, y = mse, color = modelo, linetype = escenario)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Evolución del mse", x = "Numero de condición de Ψ ", y = "MSE")
+
+resultados_bspline$mse
+
+ggplot(resultados_bspline, aes(x = nbasis, y = cond_psi, color = modelo, linetype = escenario)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Evolución del kappa(psi)", x = "nbasis", y = "Numero de condición de Ψ ")
+
+resultados_bspline$mse
+```
+
+
+```{r}
+resultados_fourier = evaluar_modelos_simulados(3000, c(11,15,31,41,51,61,71,81,91), t_denso = seq(-1, 1, length.out = 2001), t_ligero = seq(-1, 1, length.out = 101), seed = 123, Lcoef = c(3), tipo_basis = "fourier"
+)
+```
+
+```{r}
+library(dplyr)
+
+resultados_fourier <- resultados_fourier %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0_equivalencia" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+save(resultados_fourier, file = "resultados_condgram_simulacion_fourier.RData")
+```
+
+```{r}
+library(ggplot2)
+
+# 1. Crear carpeta si no existe
+carpeta <- "plots/comparacion modelos numero cond fourier"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+# ---- PLOT 1 ----
+p1 <- ggplot(resultados_fourier, aes(x = nbasis, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
        x = "nbasis", y = "AUC ROC")
 
-ggplot(resultados, aes(x = nbasis, y = IMSE_beta, color = modelo, linetype = escenario)) +
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+p2 <- ggplot(resultados_fourier, aes(x = cond_psi, y = AUC, color = modelo)) +
   geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
-  labs(title = "Evolución del IMSE(β)", x = "nbasis", y = "IMSE β")
+  labs(title = "Evolución de AUC según kappa(Psi)",
+       x = "kappa(Psi)", y = "AUC ROC")
 
-resultados$IMSE_beta
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
+       plot = p2, width = 7, height = 5, dpi = 300)
 
-ggplot(resultados, aes(x = nbasis, y = IMSE_gamma, color = modelo, linetype = escenario)) +
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = cond_psi, color = modelo)) +
   geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
-  labs(title = "Evolución del IMSE(gamma)", x = "nbasis", y = "IMSE gamma")
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "kappa(Psi)")
 
-resultados$IMSE_gamma
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
 
-ggplot(resultados, aes(x = nbasis, y = mse, color = modelo, linetype = escenario)) +
+# ---- PLOT 5 ----
+p5 <- ggplot(resultados_fourier, aes(x = cond_psi, y = mse, color = modelo)) +
   geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
-  labs(title = "Evolución del mse", x = "nbasis", y = "MSE")
+  labs(title = "Evolución de kappa(Psi) según mse",
+       x = "kappa(Psi)", y = "mse")
 
-resultados$mse
+ggsave(filename = file.path(carpeta, "msevskappa(psi).png"),
+       plot = p5, width = 7, height = 5, dpi = 300)
 ```
 
 
 
 
+```{r}
+library(dplyr)
 
+resultados_bspline <- resultados_bspline %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0_equivalencia" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+save(resultados_bspline, file = "resultados_condgram_simulacion_bspline.RData")
+```
+
+```{r}
+library(ggplot2)
+
+# 1. Crear carpeta si no existe
+carpeta <- "plots/comparacion modelos numero cond bspline"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+resultados_bspline$base <- "bspline"
+resultados_fourier$base <- "fourier"
+
+# Combinar en un único dataframe
+resultados_total <- rbind(resultados_bspline, resultados_fourier)
+
+p_comb <- ggplot(resultados_total,
+                 aes(x = nbasis,
+                     y = AUC,
+                     color = modelo,
+                     linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  scale_linetype_manual(values = c("bspline" = "solid",
+                                   "fourier" = "dashed")) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según nbasis",
+       x = "nbasis",
+       y = "AUC ROC",
+       linetype = "Base funcional")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p_comb, width = 7, height = 5, dpi = 300)
+
+
+p1 <- ggplot(resultados_bspline, aes(x = nbasis, y = AUC, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de AUC según nbasis"),
+    x = "nbasis",
+    y = "AUC ROC"
+  )
+
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+p2 <- ggplot(resultados_bspline, aes(x = cond_psi, y = AUC, color = modelo,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de AUC según " * kappa(Psi)),
+    x = expression(kappa(Psi)),
+    y = "AUC ROC"
+  )
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
+       plot = p2, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_bspline, aes(x = nbasis, y = cond_psi, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "kappa(Psi)")
+
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 5 ----
+p5 <- ggplot(resultados_bspline, aes(x = cond_psi, y = mse, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de AUC según " * kappa(Psi)),
+    x = expression(kappa(Psi)),
+    y = "AUC ROC"
+  )
+
+ggsave(filename = file.path(carpeta, "msevskappa(psi).png"),
+       plot = p5, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 6 ----
+p6 <- ggplot(resultados_bspline, aes(x = nbasis, y = mse, color = modelo ,linetype = escenario)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(
+    title = expression("Evolución de MSE según nbasis"),
+    x =  "nbasis",
+    y = "mse"
+  )
+
+ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
+       plot = p6, width = 7, height = 5, dpi = 300)
+```
 
 
 

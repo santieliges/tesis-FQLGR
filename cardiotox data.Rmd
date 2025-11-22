@@ -444,7 +444,7 @@ for (nm in nombres) {
 
 
 ```{r}
-nbasises = c(10,30,50,70,90,110)
+nbasises = c(10,20,30,50,80,110,130,140,150,180,200)
 basises <- list()
 for (nbasis in nbasises) {
   basises[[length(basises)+1]] <- create.bspline.basis(rangeval = freq_range, nbasis = nbasis)
@@ -474,7 +474,8 @@ params_Upsilon1 <- list(
     var_threshold = 0.9,
     modelo_quad = TRUE
 )
-resultados = evaluar_modelos_distintas_bases(
+
+resultados_cardiotox = evaluar_modelos_distintas_bases(
                                         data = list(X_train = X_train, 
                                                           X_valid = X_valid,
                                                           y_train = y_train,
@@ -490,15 +491,135 @@ resultados = evaluar_modelos_distintas_bases(
 ```
 
 ```{r}
+library(dplyr)
+
+resultados_cardiotox <- resultados_cardiotox %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0.2_equivalente" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+save(resultados_cardiotox, file = "resultados_cardiotox.RData")
+
+```
+
+```{r}
 library(ggplot2)
 
-ggplot(resultados, aes(x = nbasis, y = AUC, color = modelo)) +
+# 1. Crear carpeta si no existe
+carpeta <- "plots_cardiotox/comparacion modelos numero cond cardiotox"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+# ---- PLOT 1 ----
+p1 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = AUC, color = modelo)) +
   geom_line(size = 1.2) +
   geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
        x = "nbasis", y = "AUC ROC")
 
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+p2 <- ggplot(resultados_cardiotox, aes(x = cond_psi, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_psi",
+       x = "cond_psi", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
+       plot = p2, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 3 ----
+p3 <- ggplot(resultados_cardiotox, aes(x = cond_var_fd, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_var_fd",
+       x = "cond_var_fd", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_var_fd.png"),
+       plot = p3, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_psi, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "cond_psi")
+
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 5 ----
+p5 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_var_fd según nbasis",
+       x = "nbasis", y = "cond_var_fd")
+
+ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
+       plot = p5, width = 7, height = 5, dpi = 300)
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(resultados_cardiotox, aes(x = nbasis, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según nbasis",
+       x = "nbasis", y = "AUC ROC")
+
+ggplot(resultados_cardiotox, aes(x = cond_psi, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_psi",
+       x = "cond_psi", y = "AUC ROC")
+
+ggplot(resultados_cardiotox, aes(x = cond_var_fd, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_var_fd",
+       x = "cond_var_fd", y = "AUC ROC")
+
+ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_psi, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  theme_minimal() +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "cond_psi")
+
+ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_var_fd según nbasis",
+       x = "nbasis", y = "cond_var_fd")
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
