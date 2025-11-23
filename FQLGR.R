@@ -1,16 +1,42 @@
 ############################### funciones auxiliares para evaluar #####################################
+# 
+# predecir_probabilidades_validacion_en_base_fpca <- function(res, fd_valid_centered, estimationBasis) {
+#   change_basis <- inprod(fd_valid_centered$basis, estimationBasis)
+#   A_valid <- t(fd_valid_centered$coefs)
+#   A_psi_valid <- A_valid %*% change_basis
+#   
+#   beta  <- as.vector(res$beta)
+#   gamma <- res$gamma
+#   alpha <- res$alpha
+#   
+#   lin_pred  <- as.vector(A_psi_valid %*% beta)
+#   quad_pred <- rowSums((A_psi_valid %*% gamma) * A_psi_valid)
+#   y_prob_valid <- 1 / (1 + exp(-(alpha + lin_pred + quad_pred)))
+#   return(y_prob_valid)
+# }
+
+distancia_euclidea <- function(matriz1, matriz2){
+  
+  proj1 <- matriz1 %*% t(matriz1)
+  proj2 <- matriz2 %*% t(matriz2)
+  
+  err_subspace <- norm(proj1 - proj2, "F")
+  return(err_subspace)
+}
+
+dist_euclidea <- function(a, b) {
+  sqrt(sum((a - b)^2))
+}
 
 predecir_probabilidades_validacion_en_base_fpca <- function(res, fd_valid_centered, estimationBasis) {
-  change_basis <- inprod(fd_valid_centered$basis, estimationBasis)
-  A_valid <- t(fd_valid_centered$coefs)
-  A_psi_valid <- A_valid %*% change_basis
+  scores <- inprod(fd_valid_centered, estimationBasis)
   
   beta  <- as.vector(res$beta)
   gamma <- res$gamma
   alpha <- res$alpha
   
-  lin_pred  <- as.vector(A_psi_valid %*% beta)
-  quad_pred <- rowSums((A_psi_valid %*% gamma) * A_psi_valid)
+  lin_pred  <- as.vector(scores %*% beta)
+  quad_pred <- rowSums((scores %*% gamma) * scores)
   y_prob_valid <- 1 / (1 + exp(-(alpha + lin_pred + quad_pred)))
   return(y_prob_valid)
 }
@@ -170,6 +196,30 @@ evaluar_modelos_distintas_bases <- function(
       y_prob_pca <- predecir_probabilidades_validacion(
         res_pca_quad, fd_valid_centered, basis, modo = "PCA")
       
+      # # =======================
+      # #   Distancia entre parametros estimados
+      # # =======================
+      # 
+      # # Lista de modelos a comparar
+      # modelos <- list(
+      #   fpca = modelo_fpca,
+      #   equiv = modelo_fpca_equiv,
+      #   pca1 = res_pca_quad
+      # )
+      # 
+      # # Creamos una matriz para guardar distancias
+      # n <- length(modelos)
+      # distancias <- matrix(0, nrow = n, ncol = n,
+      #                      dimnames = list(names(modelos), names(modelos)))
+      # 
+      # # Llenar la matriz con distancias euclídeas
+      # for (i in 1:n) {
+      #   for (j in 1:n) {
+      #     distancias[i, j] <- distancia_euclidea(modelos[[i]], modelos[[j]])
+      #   }
+      # }
+      # 
+      # 
       resultados <- rbind(
         resultados,
         data.frame(
@@ -209,143 +259,6 @@ evaluar_modelos_distintas_bases <- function(
   }
   
   return(resultados)
-}
-
-pca.fd.nopenalty <- function(fdobj, nharm = 2, harmfdPar = fdPar(fdobj),
-                             centerfns = TRUE)
-{
-  # Realiza un FPCA sin penalización ni suavización
-  
-  # 1. Verificación del objeto
-  if (!(is.fd(fdobj) || is.fdPar(fdobj)))
-    stop("Primer argumento debe ser fd o fdPar.")
-  if (is.fdPar(fdobj)) fdobj <- fdobj$fd
-  
-  # 2. Media y centrado
-  meanfd <- mean.fd(fdobj)
-  if (centerfns) fdobj <- center.fd(fdobj)
-  
-  # 3. Coeficientes y dimensiones
-  coef  <- fdobj$coefs
-  coefd <- dim(coef)
-  ndim  <- length(coefd)
-  nrep  <- coefd[2]
-  coefnames <- dimnames(coef)
-  
-  if (nrep < 2) stop("PCA no posible sin replicaciones.")
-  
-  basisobj <- fdobj$basis
-  nbasis   <- basisobj$nbasis
-  
-  # 4. Base armónica = base original del fdPar
-  harmbasis <- harmfdPar$fd$basis
-  nhbasis   <- harmbasis$nbasis
-  
-  # --- IMPORTANTE:
-  # Eliminamos suavización. Por lo tanto:
-  # L = Psi, donde Psi = <harmbasis, harmbasis>
-  # lambda = 0 siempre.
-  
-  # 5. Matriz L = Psi (sin penalización)
-  # Lmat <- eval.penalty(harmbasis, 0)
-  # Lmat <- (Lmat + t(Lmat)) / 2  # simetrizar
-
-  Lmat = inprod(harmbasis,harmbasis)
-  
-  # 6. Cholesky de L (ortogonalización)
-  Mmat    <- chol(Lmat)
-  Mmatinv <- solve(Mmat)
-  
-  # 7. Matriz de coeficientes concatenada (multi-var)
-  if (ndim == 3) {
-    nvar <- coefd[3]
-    ctemp <- matrix(0, nvar * nbasis, nrep)
-    for(j in 1:nvar) {
-      idx <- 1:nbasis + (j - 1) * nbasis
-      ctemp[idx,] <- coef[,,j]
-    }
-  } else {
-    nvar  <- 1
-    ctemp <- coef
-  }
-  
-  # 8. Covarianza empírica de coeficientes
-  Wmat <- crossprod(t(ctemp)) / nrep
-  
-  # 9. Matriz J = <harmbasis, basisobj>
-  Jmat <- inprod(harmbasis, basisobj)
-  
-  # Transformación MIJW = M^{-1} J
-  MIJW <- crossprod(Mmatinv, Jmat)
-  
-  # 10. Construcción de la matriz de covarianza funcional C
-  if (nvar == 1) {
-    Cmat <- MIJW %*% Wmat %*% t(MIJW)
-  } else {
-    Cmat <- matrix(0, nvar*nhbasis, nvar*nhbasis)
-    for (i in 1:nvar) {
-      indexi <- 1:nbasis + (i - 1) * nbasis
-      for (j in 1:nvar) {
-        indexj <- 1:nbasis + (j - 1) * nbasis
-        Cmat[indexi, indexj] <- MIJW %*% Wmat[indexi,indexj] %*% t(MIJW)
-      }
-    }
-  }
-  
-  # 11. Eigenanálisis
-  Cmat <- (Cmat + t(Cmat))/2
-  result  <- eigen(Cmat)
-  eigvalc <- result$values
-  eigvecc <- as.matrix(result$vectors[, 1:nharm])
-  
-  # signo consistente
-  sumvecc <- apply(eigvecc, 2, sum)
-  eigvecc[, sumvecc < 0] <- -eigvecc[, sumvecc < 0]
-  
-  # proporción de varianza
-  varprop <- eigvalc[1:nharm] / sum(eigvalc)
-  
-  # 12. Coeficientes de las PCs
-  if (nvar == 1) {
-    harmcoef <- Mmatinv %*% eigvecc
-  } else {
-    harmcoef <- array(0, c(nbasis, nharm, nvar))
-    for (j in 1:nvar) {
-      idx <- 1:nbasis + (j - 1) * nbasis
-      temp <- eigvecc[idx,]
-      harmcoef[,,j] <- Mmatinv %*% temp
-    }
-  }
-  
-  # Nombres
-  harmnames <- paste0("PC", 1:nharm)
-  if(length(coefd) == 2)
-    harmnames <- list(coefnames[[1]], harmnames, "values")
-  if(length(coefd) == 3)
-    harmnames <- list(coefnames[[1]], harmnames, coefnames[[3]])
-  
-  harmfd <- fd(harmcoef, harmbasis, harmnames)
-  
-  # 13. Scores
-  if (nvar == 1) {
-    harmscr <- inprod(fdobj, harmfd)
-  } else {
-    harmscr <- array(0, c(nrep, nharm, nvar))
-    coefarray <- fdobj$coefs
-    harmcoefarray <- harmfd$coefs
-    for (j in 1:nvar) {
-      fdj  <- fd(as.matrix(coefarray[,,j]), basisobj)
-      harmj <- fd(as.matrix(harmcoefarray[,,j]), basisobj)
-      harmscr[,,j] <- inprod(fdj, harmj)
-    }
-  }
-  
-  # 14. Armar salida tipo pca.fd
-  pcafd <- list(harmfd, eigvalc, harmscr, varprop, meanfd)
-  class(pcafd) <- "pca.fd"
-  names(pcafd) <- c("harmonics", "values", "scores", "varprop", "meanfd")
-  
-  return(pcafd)
 }
 
 
@@ -881,7 +794,7 @@ fpca_Upsilon0 <- function( fd_centered,
   cost_history <- numeric(iterations)
   n        <- nrow(fd_centered$coef)
   ##busco la cantidad de componentes que explican la proporción de varianza indicada
-  fpca_result <- pca.fd.nopenalty (fd_centered, nharm = fd_centered$basis$nbasis, centerfns = TRUE) 
+  fpca_result <- pca.fd(fd_centered, nharm = fd_centered$basis$nbasis, centerfns = TRUE) 
   cum_var <- cumsum(fpca_result$varprop)  
   phi_hat <- fpca_result$harmonics  
   Xi_hat <- fpca_result$scores      
@@ -897,7 +810,7 @@ fpca_Upsilon0 <- function( fd_centered,
   }
   
   
-  fpca_result <- pca.fd.nopenalty (fd_centered, nharm = p, centerfns =  TRUE)
+  fpca_result <- pca.fd(fd_centered, nharm = p, centerfns =  TRUE)
   cum_var <- cumsum(fpca_result$varprop)  
   phi_hat <- fpca_result$harmonics  
   Xi_hat <- fpca_result$scores      
@@ -960,16 +873,19 @@ fpca_Upsilon0 <- function( fd_centered,
 
 ################################################ FPCA Equivalencia UPSILON 0 .2 ###########################
 Psi_inv_half <- function(Psi) {
-  R <- chol(Psi)
-  L <- t(R)
-  return(solve(L))   # L^{-1}
+  eig <- eigen(Psi, symmetric = TRUE)
+  V <- eig$vectors
+  L <- eig$values
+  return(V %*% diag(1 / sqrt(L)) %*% t(V))
 
 }
 Psi_half <- function(Psi) {
-  R <- chol(Psi)    
-  L <- t(R)         # triangular inferior L
-  return(L)
+  eig <- eigen(Psi, symmetric = TRUE)
+  V <- eig$vectors
+  L <- eig$values
+  return(V %*% diag(sqrt(L)) %*% t(V))
 }
+
 
 # ---- Operador H_beta^{(0.2)}(Upsilon) = psi^{-1/2}V^{(0.2)} * Upsilon ----
 H_beta_0_equiv <- function(Upsilon,V,psi) {
@@ -1156,6 +1072,193 @@ fpca_upsilon0_equiv<- function(             fd_centered,
   ))
 }
 
+# ---- Operador H_beta^{(0.2)}(Upsilon) = psi^{-1/2}V^{(0.2)} * Upsilon ----
+H_beta_0_equiv_normalizado <- function(Upsilon,V, M) {
+  V <- as.matrix(V)
+  Upsilon <- as.vector(Upsilon)
+  Minv <- solve(M)
+  return(Minv %*% V %*% Upsilon)
+}
+
+# ---- Operador H_gamma^{(0.2)}(Upsilon) = psi^{-1/2}V^{(0.2)} * vech^{-1}(Upsilon * M/2) * V^{(0.2)T}psi^{-1/2} ----
+H_gamma_0_equiv_normalizado  <- function(Upsilon, V, M) {
+  V <- as.matrix(V)
+  Upsilon <- as.vector(Upsilon)
+  Minv <- solve(M)
+  
+  # tamaño implícito de matriz simétrica
+  p <- ncol(V)
+  len_expected <- p * (p + 1) / 2
+  
+  if (length(Upsilon) != len_expected) {
+    stop(sprintf("Longitud de Upsilon incorrecta: esperada %d (para p=%d).", len_expected, p))
+  }
+  
+  # construir (M/2) 
+  M <- M_matrix_inv(p)
+  M_vec <- M[lower.tri(M, diag = TRUE)] 
+  
+  # reconstruir matriz simétrica
+  Gamma <- vech_inv(Upsilon * M_vec, p)
+  
+  # aplicar la transformación
+  return(Minv%*%V %*% Gamma %*% t(V)%*%t(Minv))
+}
+
+
+# vT_beta: calcula psi^{1/2}%*% t(V) %*% beta
+transformada_beta_fpca_equiv_normalizado  <- function(beta, V, M) {
+  V <- as.matrix(V)
+  beta <- as.matrix(beta)
+  
+  # chequeo de compatibilidad de dimensiones
+  if (nrow(V) != nrow(beta)) {
+    stop(sprintf("Dimensiones incompatibles: nrow(V) = %d, nrow(beta) = %d", nrow(V), nrow(beta)))
+  }
+  
+  # producto V^T * beta
+  result <- t(V) %*% M %*% beta
+  return(result)
+}
+
+
+
+# vech_transform: devuelve vech( (t(V) %*% gamma %*% V)  *  M )
+transformada_gamma_fpca_equiv_normalizado <- function(gamma, V, M, return_matrix = FALSE) {
+  # coerciones y checks básicos
+  V <- as.matrix(V)
+  gamma <- as.matrix(gamma)
+  if (!is.numeric(V) || !is.numeric(gamma)) {
+    stop("V y gamma deben ser matrices numéricas.")
+  }
+  # dimensiones compatibles: gamma debe ser p x p, V debe ser p x p' o p x k tal que t(V) %*% gamma %*% V tenga sentido.
+  if (nrow(V) != nrow(gamma)) {
+    stop(sprintf("Dimensiones incompatibles: ncol(V) = %d, nrow(gamma) = %d", ncol(V), nrow(gamma)))
+  }
+  
+  A <- t(V) %*% M %*% gamma %*% t(M) %*% V       
+  
+  # construir M: 1 en diagonal, 2 en triángulo inferior, 0 en triángulo superior
+  p <- nrow(A)
+  M <- matrix(0, nrow = p, ncol = p)
+  diag(M) <- 1
+  M[lower.tri(M)] <- 2
+  
+  # multiplicación elemento a elemento
+  B <- A * M
+  
+  if (return_matrix) {
+    return(B)   # si se quiere la matriz completa
+  }
+  
+  # vech: tomar triángulo inferior por columnas (incluye diagonal)
+  v <- B[lower.tri(B, diag = TRUE)]
+  return(as.numeric(v))
+}
+
+
+
+#gradient_descent_penalized_PCA -> pca_coef_Upsilon1
+fpca_upsilon0_equiv_normalizado <- function(             fd_centered,
+                                            y,
+                                            beta,
+                                            gamma,
+                                            alpha,
+                                            step_gradient,
+                                            iterations,
+                                            var_threshold = 0.95,
+                                            basis,
+                                            LdPenalization,
+                                            lambda_lin = 1e-12, 
+                                            lambda_quad = 1e-12, 
+                                            modelo_quad = TRUE,
+                                            tol = 1e-6,
+                                            batch_size = 100,
+                                            scale = TRUE,
+                                            verbose = TRUE) {   
+  
+  
+  
+  cost_history <- numeric(iterations)
+  psi <- inprod(basis, basis)
+  M <- chol(psi)  
+  Minv <- solve(M)
+  
+  psi <- Minv %*% psi %*% t(Minv)
+  
+  # 1. Matriz A y A_psi
+  A <- t(fd_centered$coefs)
+  A_psi_half <- A %*% t(M) %*% Psi_half(psi)
+  
+  # 2. PCA sobre A_psi
+  pca_result <- prcomp(A_psi_half, center = TRUE, scale. = scale)
+  
+  # 3. Varianza explicada
+  var_exp_acum <- cumsum(pca_result$sdev^2) / sum(pca_result$sdev^2)
+  K <- which(var_exp_acum >= var_threshold)[1]
+  Z_lin <- pca_result$x[, 1:K]
+  Z_quad <- generar_matriz_cuadratica(Z_lin)
+  
+  
+  # 5. Rugosidad
+  LdBasis <- getbasispenalty(basis, LdPenalization)
+  V <- pca_result$rotation[, 1:K]  # p x K
+  penalty_beta_reduced <- LdBasis      # K x K
+  penalty_beta_reduced <- penalty_beta_reduced / norm(penalty_beta_reduced, type = "F")
+  penalty_gamma_reduced <- LdBasis    # K x K
+  penalty_gamma_reduced <- penalty_gamma_reduced / norm(penalty_gamma_reduced, type = "F")
+  
+  res_gradiente <- gradient_descent_penalized_quad(    Z_lin = Z_lin,
+                                                       Z_quad = Z_quad,
+                                                       y = y,
+                                                       transformada_beta_fun = transformada_beta_fpca_equiv_normalizado,
+                                                       transformada_gamma_fun = transformada_gamma_fpca_equiv_normalizado,
+                                                       H_beta_fun = H_beta_0_equiv_normalizado,
+                                                       H_gamma_fun = H_gamma_0_equiv_normalizado,
+                                                       modelo_quad = modelo_quad,
+                                                       step_gradient = step_gradient,
+                                                       tol = tol,
+                                                       batch_size = batch_size,
+                                                       lambda_lin = lambda_lin,
+                                                       lambda_quad = lambda_quad,
+                                                       iterations = iterations,
+                                                       penalty_beta_reduced = penalty_beta_reduced,
+                                                       penalty_gamma_reduced = penalty_gamma_reduced,
+                                                       beta = beta,
+                                                       gamma = gamma,
+                                                       V_lin = V,
+                                                       V_quad = V,
+                                                       psi = M,
+                                                       verbose = verbose)
+  
+  # --- Deshacer escala ---
+  
+  mu <- pca_result$center  # longitud p
+  s  <- if (scale) pca_result$scale else rep(1, length(mu))  # <--- solo si scale=TRUE
+  s_safe <- ifelse(s == 0, 1, s)
+  s_safe_matrix <- matrix(s_safe, nrow = length(s_safe), ncol = 1)
+  
+  # matriz de autovectores pero escalada dandonos la transformación al espacio original.
+  V  <- (pca_result$rotation * 1/s_safe)[, 1:K, drop = FALSE]
+  
+  gamma_original  <- H_gamma_0_equiv(res_gradiente$UpsGamma, V, M)
+  beta_original   <- H_beta_0_equiv(res_gradiente$UpsBeta, V, M) 
+  alpha_original  <- res_gradiente$alpha
+  
+  return(list(
+    beta_reduced = res_gradiente$UpsBeta,
+    gamma_reduced = res_gradiente$UpsGamma,
+    beta = as.vector(beta_original),
+    gamma = gamma_original,
+    alpha = alpha_original,
+    cost_history = res_gradiente$cost_history,
+    K = K,
+    pca_model = pca_result,
+    coords_f_en_base = Psi_half(psi) %*% V
+  ))
+}
+
+
 ################################################ PCA COEF UPSILON 1 ########################################
 
 # ---- Operador H_beta^{(1)}(Upsilon) = V^{(1)} * Upsilon ----
@@ -1324,6 +1427,192 @@ pca_coef_Upsilon1 <- function(             fd_centered,
   
   gamma_original  <- H_gamma_1(res_gradiente$UpsGamma, V)
   beta_original   <- H_beta_1(res_gradiente$UpsBeta, V) 
+  alpha_original  <- res_gradiente$alpha
+  
+  return(list(
+    beta_reduced = res_gradiente$UpsBeta,
+    gamma_reduced = res_gradiente$UpsGamma,
+    beta = as.vector(beta_original),
+    gamma = gamma_original,
+    alpha = alpha_original,
+    cost_history = res_gradiente$cost_history,
+    K = K,
+    pca_model = pca_result
+  ))
+}
+
+# ---- Operador H_beta^{(1)}(Upsilon) = V^{(1)} * Upsilon ----
+H_beta_1_normalizado <- function(Upsilon,V, M) {
+  V <- as.matrix(V)
+  Upsilon <- as.vector(Upsilon)
+  Minv <- solve(M)
+  
+  return(Minv %*% V %*% Upsilon)
+}
+
+# ---- Operador H_gamma^{(1)}(Upsilon) = V^{(1)} * vech^{-1}(Upsilon * M/2) * V^{(1)T} ----
+H_gamma_1_normalizado <- function(Upsilon, V, M) {
+  V <- as.matrix(V)
+  Upsilon <- as.vector(Upsilon)
+  Minv <- solve(M)
+  # tamaño implícito de matriz simétrica
+  p <- ncol(V)
+  len_expected <- p * (p + 1) / 2
+  
+  if (length(Upsilon) != len_expected) {
+    stop(sprintf("Longitud de Upsilon incorrecta: esperada %d (para p=%d).", len_expected, p))
+  }
+  
+  # construir (M/2) 
+  M <- M_matrix_inv(p)
+  M_vec <- M[lower.tri(M, diag = TRUE)] 
+  
+  # reconstruir matriz simétrica
+  Gamma <- vech_inv(Upsilon * M_vec, p)
+  
+  # aplicar la transformación
+  return( Minv %*% V %*% Gamma %*% t(V) %*% t(Minv))
+}
+
+
+# vT_beta: calcula t(V) %*% beta
+transformada_beta_pca_normalizado <- function(beta, V, M) {
+  V <- as.matrix(V)
+  beta <- as.matrix(beta)
+  
+  # chequeo de compatibilidad de dimensiones
+  if (nrow(V) != nrow(beta)) {
+    stop(sprintf("Dimensiones incompatibles: nrow(V) = %d, nrow(beta) = %d", nrow(V), nrow(beta)))
+  }
+  
+  # producto V^T * beta
+  result <- t(V) %*% M %*% beta
+  return(result)
+}
+
+
+
+# vech_transform: devuelve vech( (t(V) %*% gamma %*% V)  *  M )
+transformada_gamma_pca_normalizado <- function(gamma, V, M, return_matrix = FALSE) {
+  # coerciones y checks básicos
+  V <- as.matrix(V)
+  gamma <- as.matrix(gamma)
+  if (!is.numeric(V) || !is.numeric(gamma)) {
+    stop("V y gamma deben ser matrices numéricas.")
+  }
+  # dimensiones compatibles: gamma debe ser p x p, V debe ser p x p' o p x k tal que t(V) %*% gamma %*% V tenga sentido.
+  if (nrow(V) != nrow(gamma)) {
+    stop(sprintf("Dimensiones incompatibles: ncol(V) = %d, nrow(gamma) = %d", ncol(V), nrow(gamma)))
+  }
+  
+  # calcular A = t(V) %*% gamma %*% V
+  A <- t(V) %*% M %*% gamma %*% t(M) %*% V       # resultado: p x p if V is p x k? -> see check above
+  
+  # construir M: 1 en diagonal, 2 en triángulo inferior, 0 en triángulo superior
+  p <- nrow(A)
+  M <- matrix(0, nrow = p, ncol = p)
+  diag(M) <- 1
+  M[lower.tri(M)] <- 2
+  
+  # multiplicación elemento a elemento
+  B <- A * M
+  
+  if (return_matrix) {
+    return(B)   # si se quiere la matriz completa
+  }
+  
+  # vech: tomar triángulo inferior por columnas (incluye diagonal)
+  v <- B[lower.tri(B, diag = TRUE)]
+  return(as.numeric(v))
+}
+
+
+
+#gradient_descent_penalized_PCA -> pca_coef_Upsilon1
+pca_coef_Upsilon1_normalizado <- function(             fd_centered,
+                                           y,
+                                           beta,
+                                           gamma,
+                                           alpha,
+                                           step_gradient,
+                                           iterations,
+                                           var_threshold = 0.95,
+                                           basis,
+                                           LdPenalization,
+                                           lambda_lin = 1e-12, 
+                                           lambda_quad = 1e-12, 
+                                           modelo_quad = TRUE,
+                                           tol = 1e-6,
+                                           batch_size = 100,
+                                           scale = TRUE,
+                                           verbose = TRUE) {   
+  
+  
+  
+  cost_history <- numeric(iterations)
+  psi <- inprod(basis, basis)
+  M <- chol(psi)  
+  Minv <- solve(t(M))
+  
+  psi <- Minv %*% psi %*% t(Minv)
+  
+  # 1. Matriz A y A_psi
+  A <- t(fd_centered$coefs)
+  A_psi <- A %*% t(M) %*% psi
+  
+  # 2. PCA sobre A_psi
+  pca_result <- prcomp(A_psi, center = TRUE, scale. = scale)
+  
+  # 3. Varianza explicada
+  var_exp_acum <- cumsum(pca_result$sdev^2) / sum(pca_result$sdev^2)
+  K <- which(var_exp_acum >= var_threshold)[1]
+  Z_lin <- pca_result$x[, 1:K]
+  Z_quad <- generar_matriz_cuadratica(Z_lin)
+  
+  
+  # 5. Rugosidad
+  LdBasis <- getbasispenalty(basis, LdPenalization)
+  V <- pca_result$rotation[, 1:K]  # p x K
+  penalty_beta_reduced <- LdBasis      # K x K
+  penalty_beta_reduced <- penalty_beta_reduced / norm(penalty_beta_reduced, type = "F")
+  penalty_gamma_reduced <- LdBasis    # K x K
+  penalty_gamma_reduced <- penalty_gamma_reduced / norm(penalty_gamma_reduced, type = "F")
+  
+  res_gradiente <- gradient_descent_penalized_quad(    Z_lin = Z_lin,
+                                                       Z_quad = Z_quad,
+                                                       y = y,
+                                                       transformada_beta_fun = transformada_beta_pca_normalizado,
+                                                       transformada_gamma_fun = transformada_gamma_pca_normalizado,
+                                                       H_beta_fun = H_beta_1_normalizado,
+                                                       H_gamma_fun = H_gamma_1_normalizado,
+                                                       modelo_quad = modelo_quad,
+                                                       step_gradient = step_gradient,
+                                                       tol = tol,
+                                                       batch_size = batch_size,
+                                                       lambda_lin = lambda_lin,
+                                                       lambda_quad = lambda_quad,
+                                                       iterations = iterations,
+                                                       penalty_beta_reduced = penalty_beta_reduced,
+                                                       penalty_gamma_reduced = penalty_gamma_reduced,
+                                                       beta = beta,
+                                                       gamma = gamma,
+                                                       V_lin = V,
+                                                       V_quad = V,
+                                                       psi = M,
+                                                       verbose = verbose)
+  
+  # --- Deshacer escala ---
+  
+  mu <- pca_result$center  # longitud p
+  s  <- if (scale) pca_result$scale else rep(1, length(mu))  # <--- solo si scale=TRUE
+  s_safe <- ifelse(s == 0, 1, s)
+  s_safe_matrix <- matrix(s_safe, nrow = length(s_safe), ncol = 1)
+  
+  # matriz de autovectores pero escalada dandonos la transformación al espacio original.
+  V  <- (pca_result$rotation * 1/s_safe)[, 1:K, drop = FALSE]
+  
+  gamma_original  <- H_gamma_1_normalizado(res_gradiente$UpsGamma, V, M)
+  beta_original   <- H_beta_1_normalizado(res_gradiente$UpsBeta, V, M) 
   alpha_original  <- res_gradiente$alpha
   
   return(list(

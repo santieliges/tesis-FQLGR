@@ -512,6 +512,9 @@ simular_datos_funcionales_chol <- function(
        escenario_ligero_chol  <- simular_datos_funcionales_chol(seq(-1, 1, length.out = 201),1000, nbasis = 100, seed = 123, escenario = "denso")
   
        sum(escenario_ligero_chol$y_train)/length(escenario_ligero_chol$y_train)
+       
+       inprod(escenario_ligero_chol$fd_train$basis,escenario_ligero_chol$fd_train$basis)
+
 
 ```
 
@@ -777,6 +780,12 @@ resultados_bspline_chol <- resultados_bspline_chol  %>%
 
 save(resultados_bspline_chol, file = "resultados_condgram_simulacion_bspline_chol.RData")
 ```
+
+```{r}
+load("resultados_condgram_simulacion_bspline.RData")
+load("resultados_condgram_simulacion_bspline_chol.RData")
+```
+
 
 ```{r}
 library(ggplot2)
