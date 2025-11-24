@@ -753,7 +753,7 @@ evaluar_modelos_simulados <- function(n = 3000,
       
       for (i in 1:n_mod) {
         for (j in 1:n_mod) {
-          
+
           m1 <- modelos[[i]]
           m2 <- modelos[[j]]
           
@@ -762,8 +762,8 @@ evaluar_modelos_simulados <- function(n = 3000,
             modelo1 = names(modelos)[i],
             modelo2 = names(modelos)[j],
             dist_alpha = abs(m1$alpha - m2$alpha),
-            dist_beta  = dist_euclidea(m1$beta, m2$beta),
-            dist_gamma = dist_euclidea(as.vector(m1$gamma), as.vector(m2$gamma))
+            dist_beta  = dist_euclidea(m1$beta_reduced, m2$beta_reduced),
+            dist_gamma = dist_euclidea(as.vector(m1$gamma_reduced), as.vector(m2$gamma_reduced))
           )
           
         }
@@ -821,20 +821,200 @@ evaluar_modelos_simulados <- function(n = 3000,
 
 ```
 
+```{r}
+distancias_modelos_simulados_K_fijo <- function(n = 3000,
+                                      nbasis_grid = c(30, 50, 70),
+                                      t,
+                                      seed = 123,
+                                      Lcoef = 2,
+                                      tipo_basis = "bspline",
+                                      chol = FALSE) {
+  
+  distancias_df <- tibble::tibble(
+    nbasis = numeric(),
+    modelo1 = character(),
+    modelo2 = character(),
+    dist_alpha = numeric(),
+    dist_beta = numeric(),
+    dist_gamma = numeric()
+  )
+  
+  for (nbasis in nbasis_grid) {
+    
+    escenario_denso   <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "denso")
+    escenario_ligero  <- simular_datos_funcionales(t, n, nbasis = nbasis, seed = seed, tipo_basis= tipo_basis, escenario = "ligero")
+    
+    for (escenario_nombre in c("denso", "ligero")) {
+      
+      escenario <- if (escenario_nombre == "denso") escenario_denso else escenario_ligero
+      
+      t <- escenario$t
+      basis <- escenario$basis
+      fd_train <- escenario$fd_train
+      y_train <- escenario$y_train
+      
+      psi = inprod(fd_train$basis, fd_train$basis)
+      harmacclLdf <- vec2Lfd(Lcoef, range(t))
+      
+      beta_init <- rnorm(nbasis, sd = 0.1)
+      gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+      
+      modelo_fpca <- fpca_Upsilon0(
+        fd_centered = fd_train,
+        y = y_train,
+        beta = beta_init,
+        gamma = gamma_init,
+        alpha = 0,
+        step_gradient = 0.005,
+        iterations = 15000,
+        var_threshold = 0.8,
+        K = 8,
+        tol = 1e-9,
+        basis = basis,
+        LdPenalization = harmacclLdf,
+        lambda_lin = 0,
+        lambda_quad = 0,
+        verbose = FALSE
+      )
+      
+# =======================
+      # Modelos FPCA equiv (Upsilon02)
+      # =======================
+      if (chol) {
+        beta_init <- rnorm(nbasis, sd = 0.1)
+        gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+        
+        modelo_fpca_equiv <- fpca_upsilon0_equiv_normalizado(
+          fd_centered = fd_train,
+          y = y_train,
+          beta = beta_init,
+          gamma = gamma_init,
+          alpha = 0,
+          step_gradient = 0.005,
+          iterations = 15000,
+          var_threshold = 0.8,
+                  K = 8,
+          tol = 1e-9,
+          basis = basis,
+          LdPenalization = harmacclLdf,
+          lambda_lin = 0,
+          lambda_quad = 0,
+                  verbose = FALSE
+  
+        )
+        
+        # =======================
+        # Modelos PCA coef (Upsilon1)
+        # =======================
+        res_pca_quad <- pca_coef_Upsilon1_normalizado(
+          fd_centered = fd_train,
+          y = y_train,
+          beta = beta_init,
+          gamma = gamma_init,
+          alpha = 0,
+          step_gradient = 0.005,
+          iterations = 10000,
+          var_threshold = 0.8,
+                  K = 8,
+          tol = 1e-9,
+          basis = basis,
+          LdPenalization = harmacclLdf,
+          lambda_lin = 0,
+          lambda_quad = 0,
+                  verbose = FALSE
+        )
+      }
+      else{
+        beta_init <- rnorm(nbasis, sd = 0.1)
+        gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
+        
+        modelo_fpca_equiv <- fpca_upsilon0_equiv(
+          fd_centered = fd_train,
+          y = y_train,
+          beta = beta_init,
+          gamma = gamma_init,
+          alpha = 0,
+          step_gradient = 0.005,
+          iterations = 15000,
+          var_threshold = 0.8,
+                  K = 8,
+          tol = 1e-9,
+          basis = basis,
+          LdPenalization = harmacclLdf,
+          lambda_lin = 0,
+          lambda_quad = 0,
+                  verbose = FALSE
+  
+        )
+        
+        # =======================
+        # Modelos PCA coef (Upsilon1)
+        # =======================
+        res_pca_quad <- pca_coef_Upsilon1(
+          fd_centered = fd_train,
+          y = y_train,
+          beta = beta_init,
+          gamma = gamma_init,
+          alpha = 0,
+          step_gradient = 0.005,
+          iterations = 10000,
+          var_threshold = 0.8,
+                  K = 8,
+          tol = 1e-9,
+          basis = basis,
+          LdPenalization = harmacclLdf,
+          lambda_lin = 0,
+          lambda_quad = 0,
+                  verbose = FALSE
+  
+        )
+        
+      }
+      
+      modelos <- list(
+        fpca     = modelo_fpca,
+        equiv    = modelo_fpca_equiv,
+        pca_quad = res_pca_quad
+      )
+      
+      for (i in 1:3) {
+        for (j in 1:3) {
+          
+          m1 <- modelos[[i]]
+          m2 <- modelos[[j]]
+          
+          distancias_df <- distancias_df %>% 
+            add_row(
+              nbasis = nbasis,
+              modelo1 = names(modelos)[i],
+              modelo2 = names(modelos)[j],
+              dist_alpha = abs(m1$alpha - m2$alpha),
+              dist_beta  = dist_euclidea(m1$beta_reduced, m2$beta_reduced),
+              dist_gamma = dist_euclidea(as.vector(m1$gamma_reduced), as.vector(m2$gamma_reduced))
+            )
+        }
+      }
+    }
+  }
+  
+  return(distancias_df)
+}
+
+```
 
 
 ```{r}
 resultados_y_distancias_bspline = evaluar_modelos_simulados(3000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(3)
 )
 resultados_bspline <- resultados_y_distancias_bspline$resultados
-distancias_bspline <- resultados_y_distancias_bspline$distancias
+distancias_bspline <- distancias_modelos_simulados_K_fijo(3000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(0))
 
 
 resultados_y_distancias_bspline_chol = evaluar_modelos_simulados(1000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(0), chol = TRUE
 )
 
 resultados_bspline_chol <- resultados_y_distancias_bspline_chol$resultados
-distancias_bspline_chol <- resultados_y_distancias_bspline_chol$distancias
+distancias_bspline_chol <- distancias_modelos_simulados_K_fijo(1000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(0), chol = TRUE)
 
 
 ```
@@ -1280,7 +1460,7 @@ resultados_fourier = evaluar_modelos_simulados(3000, c(11,15,31,41,51,61,71,81,9
 resultados_fourier_prueba = evaluar_modelos_simulados(3000, c(11,15,31), t = seq(-1, 1, length.out = 301), seed = 123, Lcoef = c(0), tipo_basis = "fourier"
 )
 
-resultados_fourier_prueba$AUC
+resultados_fourier_prueba$distancias
 ```
 
 

@@ -1048,7 +1048,7 @@ predecir_probabilidades_validacion_en_base_fpca <- function(res, fd_valid_center
 #------------------------------------------------------------
 varianza_fija <- 0.9  # o 0.9, según el caso
 
-lambdas_quad <- c(0, 1e-6, 1e-4, 1e-2, 1)
+lambdas_quad <- c(0, 1e-6, 1e-4, 1e-2, 1, 1e2, 1e4)
 
 base_params <- list(
   ldfobj = 2,
@@ -1123,29 +1123,29 @@ ggplot(roc_df, aes(x = fpr, y = tpr, color = lambda)) +
   coord_equal() +
   theme_minimal(base_size = 13) +
   labs(
-    title = bquote("Curvas ROC para distintos valores de" ~ lambda[lin] ~ 
+    title = bquote("Curvas ROC para distintos valores de" ~ lambda[quad] ~ 
                    "(varianza explicada =" ~ .(varianza_fija) ~ ")"),
     x = "1 - Especificidad (FPR)",
     y = "Sensibilidad (TPR)",
-    color = expression(lambda[lin])
+    color = expression(lambda[quad])
   )
 
 ggsave(
-  filename = file.path("plots/variandoPenalizacion", paste0("curvas_ROC_lambda_lin_var_", varianza_fija, ".png")),
+  filename = file.path("plots/variandoPenalizacion", paste0("curvas_ROC_lambda_quad_var_", varianza_fija, ".png")),
   width = 7, height = 6, dpi = 300
 )
 
 #------------------------------------------------------------
 # 6. Tabla resumen de métricas
 #------------------------------------------------------------
-metricas_df_penalizacion_lin <- data.frame(
-  lambda_lin = lambdas_lin,
+metricas_df_penalizacion_quad <- data.frame(
+  lambda_lin = lambdas_quad,
   MSE = mse_vals,
   IMSE_beta = imseb_vals,
   IMSE_gamma = imseg_vals,
   AUCROC = auc_roc_vals,
   AUCPR = auc_pr_vals
 )
-print(metricas_df_penalizacion_lin)
+print(metricas_df_penalizacion_quad)
 
 ```

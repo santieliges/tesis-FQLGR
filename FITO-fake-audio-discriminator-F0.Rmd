@@ -1,0 +1,511 @@
+---
+title: "FakeAudioDiscriminator"
+author: "Santiago Eliges"
+date: "2025-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+source("FQLGR.R")
+```
+
+# Librerías y Configuración Inicial
+
+```{r}
+# Instalar paquetes necesarios (si no están instalados)
+if (!require("fda")) install.packages("fda")
+if (!require("MASS")) install.packages("MASS")
+if (!require("pROC")) install.packages("pROC")
+library(pROC)
+library(fda)
+library(MASS)
+library(tuneR)
+library(seewave)
+```
+
+# Pre-proceso de datos
+LINK de dataset: https://www.kaggle.com/datasets/mohammedabdeldayem/the-fake-or-real-dataset
+
+Los datos tomados para este modelo son audios cortos de longitud variable (2 a 10 segs aprox) de fragmentos de audios reales (cortados aparentemente de manera aleatoria) sin balancear por géneros y una misma cantidad de adios falsos generados con modelos de deepfake; "The dataset aggregates data from the latest TTS solutions (such as Deep Voice 3 and Google Wavenet TTS) as well as a variety of real human speech, including the Arctic Dataset (http://festvox.org/cmu_arctic/), LJSpeech Dataset (https://keithito.com/LJ-Speech-Dataset/), VoxForge Dataset (http://www.voxforge.org) and our own speech recordings."
+
+Como tardaba muchisimo procesar el dataset con los audios, tuve que preprocesar con la frecuencia fundamental o F0 (una estimación de la frecuencia más baja de todas en la serie armonica) donde traté de mantener una base bastante densa y con mucha información
+
+La idea de usar la F0 la saqué de Functional Data Analysis for Phonetic Research
+Gubian, M.
+2011, Article in monograph or in proceedings (Workshop on New Tools and Methods for Very-LargeScale Phonetics Research (VLSP 2011), pp. DVD). Medio que la intuición es que la F0 fakes deben ser más abruptas y/o escalonadas
+
+```{r}
+# --- Paquetes necesarios ---
+library(tuneR)
+library(seewave)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+# 
+# # --- Definir rutas ---
+# carpeta_training_fake <- 'archive/archive/for-norm/for-norm/training/fake'
+# carpeta_training_real <- 'archive/archive/for-norm/for-norm/training/real'
+# 
+# # --- Definir rutas ---
+# carpeta_testing_fake <- './archive/archive/for-norm/for-norm/testing/fake'
+# carpeta_testing_real <- './archive/archive/for-norm/for-norm/testing/real'
+# 
+# # --- Listar archivos de audio ---
+# archivos_fake <- list.files(carpeta_training_fake,  full.names = TRUE)
+# archivos_real <- list.files(carpeta_training_real,  full.names = TRUE)
+# archivos_testing_fake <- list.files(carpeta_testing_fake, full.names = TRUE)
+# archivos_testing_real <- list.files(carpeta_testing_real, full.names = TRUE)
+# # --- Seleccionar ejemplos al azar ---
+# set.seed(123)
+# muestras_fake <- sample(archivos_fake, 3)
+# muestras_real <- sample(archivos_real, 3)
+
+# --- Función para graficar la F0 ---
+graficar_F0 <- function(archivo, clase) {
+  # Leer el audio
+  audio <- readWave(archivo)
+  
+  # Si tiene más de un canal, usar el primero
+  if (audio@stereo) audio <- mono(audio, "left")
+  
+  # Estimar F0 usando fund() de seewave
+  f0 <- fund(audio, fmax =500, f = audio@samp.rate, ovlp = 50, plot = FALSE)  # fmax puede ajustarse según rango de voz
+  print(summary(f0[, 2]))
+  
+
+  # fund() devuelve un vector de frecuencias y un vector de tiempo
+  df <- data.frame(
+    time = f0[,1],    # tiempo
+    F0 = f0[,2]       # frecuencia fundamental
+  )
+  
+  # Gráfico
+  ggplot(df, aes(x = time, y = F0)) +
+    geom_line(color = ifelse(clase == "FAKE", "red", "blue")) +
+    labs(
+      title = paste("Clase:", clase, "\nArchivo:", basename(archivo)),
+      x = "Tiempo (s)", y = "F0 (Hz)"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 10),
+      axis.text = element_text(size = 8)
+    )
+}
+
+```
+
+
+
+```{r}
+
+#--------------------------------------------------------------
+# 🔹 Calcular duración promedio de los audios (en segundos)
+#   (mantiene utilidad general, aunque ya no se usa para recortar)
+#--------------------------------------------------------------
+calcular_duracion_media <- function(archivos_wav) {
+  duraciones <- sapply(archivos_wav, function(archivo) {
+    if (!file.exists(archivo)) return(NA)
+    audio <- readWave(archivo)
+    audio_mono <- mono(audio, "left")
+    length(audio_mono@left) / audio_mono@samp.rate
+  })
+  mean(duraciones, na.rm = TRUE)
+}
+
+#--------------------------------------------------------------
+# 🔹 Procesar carpeta de audios: estimar F0 y devolver curvas interpoladas
+#   Sin recortar duración + filtra resultados con NAs
+#--------------------------------------------------------------
+procesar_carpeta_F0_fixed <- function(archivos_wav, n_points = 512, fmax = 500) {
+  lista_F0 <- list()
+  nombres_archivos <- c()
+  errores_fund <- c()
+  
+  for (archivo in archivos_wav) {
+    if (!file.exists(archivo)) print(cat("NO EXISTE EL FUCKING ARCHIVO, " ,archivo))
+    
+    # Leer audio
+    audio <- readWave(archivo)
+    audio_mono <- mono(audio, "left")
+    fs <- audio_mono@samp.rate
+    
+    # Estimar F0
+    f0_est <- tryCatch({
+      fund(audio_mono, fmax = fmax, f = fs, ovlp = 75, plot = FALSE)
+    }, error = function(e) NULL)
+    
+    # Si la estimación falló o devolvió NA, saltar archivo
+    if (is.null(f0_est) || anyNA(f0_est[, 2])) {
+      errores_fund <- c(errores_fund, basename(archivo))
+      next
+    }
+    
+    
+    tiempos <- f0_est[, 1]
+    f0 <- f0_est[, 2]
+    
+    # Filtrar valores NA o negativos del F0
+    mask_valid <- !is.na(f0) & f0 > 0
+    if (sum(mask_valid) < 5) next  # muy pocos puntos válidos → descartar
+    tiempos <- tiempos[mask_valid]
+    f0 <- f0[mask_valid]
+    
+    # Interpolar a n_points puntos uniformemente distribuidos
+    f0_interp <- approx(x = tiempos, y = f0,
+                        xout = seq(min(tiempos), max(tiempos), length.out = n_points))$y
+    
+    # Si todavía quedan NAs (por interpolación irregular), descartar
+    if (anyNA(f0_interp)) next
+    
+    lista_F0[[length(lista_F0) + 1]] <- f0_interp
+    nombres_archivos <- c(nombres_archivos, basename(archivo))
+  }
+  
+  if (length(lista_F0) == 0) {
+    warning("No se pudieron procesar audios válidos en: ", paste0(head(archivos_wav, 3), collapse = ", "), " ...")
+    return(data.frame())
+  }
+  
+  df <- as.data.frame(do.call(rbind, lista_F0))
+  rownames(df) <- nombres_archivos
+  return(df)
+}
+
+
+#--------------------------------------------------------------
+# 🔹 Carga o generación de datos preprocesados
+#--------------------------------------------------------------
+
+# Nombre del archivo donde se guardan los dataframes procesados
+archivo_datos <- "F0_dataframes.RData"
+
+if (file.exists(archivo_datos)) {
+  message("chivo RData encontrado. Cargando datos...")
+  load(archivo_datos)
+  
+} else {
+  message("No se encontró el archivo RData. Ejecutando preprocesamiento...")
+
+  #--------------------------------------------------------------
+  # Ejemplo de uso en dataset de entrenamiento y test
+  #--------------------------------------------------------------
+
+  archivos_fake <- list.files(carpeta_training_fake, full.names = TRUE)
+  archivos_real <- list.files(carpeta_training_real, full.names = TRUE)
+
+  archivos_training <- c(archivos_fake, archivos_real)
+
+  # Parámetros
+  n_freqs <- 1024
+
+  # Procesamiento de F0
+  df_F0_training_fake <- procesar_carpeta_F0_fixed(archivos_fake, n_points = n_freqs)
+  df_F0_training_real <- procesar_carpeta_F0_fixed(archivos_real, n_points = n_freqs)
+
+  df_F0_training_fake$clase <- 1
+  df_F0_training_real$clase <- 0
+
+  # Balanceo de clases
+  set.seed(123)
+  n_min <- min(nrow(df_F0_training_fake), nrow(df_F0_training_real))
+  df_F0_training_fake_eq <- df_F0_training_fake[sample(nrow(df_F0_training_fake), n_min), ]
+  df_F0_training_real_eq <- df_F0_training_real[sample(nrow(df_F0_training_real), n_min), ]
+
+  # Combinar ambos conjuntos
+  df_F0_training_completo <- rbind(df_F0_training_fake_eq, df_F0_training_real_eq)
+  rownames(df_F0_training_completo) <- NULL
+
+  #--------------------------------------------------------------
+  #Procesamiento de datos de test
+  #--------------------------------------------------------------
+
+  archivos_testing_fake <- list.files(carpeta_testing_fake, full.names = TRUE)
+  archivos_testing_real <- list.files(carpeta_testing_real, full.names = TRUE)
+  archivos_testing <- c(archivos_testing_fake, archivos_testing_real)
+
+  df_F0_testing_fake <- procesar_carpeta_F0_fixed(archivos_testing_fake, n_points = n_freqs)
+  df_F0_testing_real <- procesar_carpeta_F0_fixed(archivos_testing_real, n_points = n_freqs)
+
+  df_F0_testing_fake$clase <- 1
+  df_F0_testing_real$clase <- 0
+
+  df_F0_testing_completo <- rbind(df_F0_testing_fake, df_F0_testing_real)
+  set.seed(123)
+  df_F0_testing_completo <- df_F0_testing_completo[sample(nrow(df_F0_testing_completo)), ]
+  rownames(df_F0_testing_completo) <- NULL
+
+  #--------------------------------------------------------------
+  # Guardar resultados
+  #--------------------------------------------------------------
+
+  save(df_F0_training_completo,
+       df_F0_testing_completo,
+       file = archivo_datos)
+
+  message("eprocesamiento completado y datos guardados en ", archivo_datos)
+}
+
+
+
+  
+```
+
+
+
+
+```{r}
+# Dominio
+t <- 1:1025
+freq_range <- c(1, 1025)
+
+# Parámetros de la base B-spline
+nbasis <- 80
+norder <- 5
+Lcoef <- c(2)
+harmacclLdf <- vec2Lfd(Lcoef, freq_range)
+
+# -----
+# Crear los nudos (breaks) dentro del rango, incluyendo los bordes
+# -----
+n_internal <- nbasis - norder + 2
+breaks <- seq(freq_range[1], freq_range[2], length.out = n_internal)
+
+# Crear la base B-spline
+estimationBasis <- create.bspline.basis(
+  rangeval = freq_range,
+  norder = norder,
+  breaks = breaks
+)
+
+# Definir el objeto de penalización funcional
+fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLdf)
+
+
+# Entrenamiento
+Y_train <- as.numeric(df_F0_training_completo$clase)
+X_train <- df_F0_training_completo #%>% select(-clase)
+fd_train <- smooth.basis(argvals = t, y = t(X_train), fdPar_obj)$fd
+fd_train_centered <- center.fd(fd_train)
+
+# Test
+Y_valid <- as.numeric(df_F0_testing_completo$clase)
+X_valid <- df_F0_testing_completo #%>% select(-clase)
+fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdPar_obj)$fd
+fd_valid_centered <- center.fd(fd_valid)
+
+```
+
+
+
+
+```{r}
+nbasises = c(10,30,50,70,90,150,250,400,600)
+basises <- list()
+for (nbasis in nbasises) {
+  basises[[length(basises)+1]] <- create.bspline.basis(rangeval = freq_range, nbasis = nbasis)
+}
+
+grids = c(freq_range[1]:freq_range[2] ,seq(freq_range[1], freq_range[2], length.out = freq_range[2]-freq_range[1] * 3))
+
+densidades = c(1025)
+
+params_Upsilon0 <- list(
+    step_gradient = 0.001,
+    iterations = 15000,
+    tol = 1e-10,
+    lambda_lin = 0,
+    lambda_quad = 0,
+    var_threshold = 0.9,
+    modelo_quad = TRUE
+)
+params_Upsilon1 <- list(
+    step_gradient = 0.001,
+    iterations = 15000,
+    tol = 1e-10,
+    lambda_lin = 0,
+    lambda_quad = 0,
+    var_threshold = 0.9,
+    modelo_quad = TRUE
+)
+resultados_y_distancias_f0 = evaluar_modelos_distintas_bases(
+                                        data = list(X_train = X_train, 
+                                                          X_valid = X_valid,
+                                                          y_train = Y_train,
+                                                          y_valid = Y_valid),
+                                      basises = basises,
+                                      densidades_grillas = densidades,
+                                      seed = 123,
+                                      Lcoef = c(0),
+                                      params_Upsilon0 = params_Upsilon0,
+                                      params_Upsilon1 = params_Upsilon1)
+
+resultados_f0 <- resultados_y_distancias_f0$resultados
+distancias_f0 <- resultados_y_distancias_f0$distancias
+
+```
+
+```{r}
+library(dplyr)
+
+resultados_f0 <- resultados_f0 %>%
+  mutate(
+    modelo = case_when(
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0.2_equivalente" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo
+    )
+  )
+
+distancias_f0 <- distancias_f0 %>%
+  mutate(
+    modelo1 = case_when(
+      modelo1 == "fpca" ~ "Upsilon^{(0)}",
+      modelo1 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo1 == "pca_quad" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo1
+    )
+  )
+distancias_f0 <- distancias_f0 %>%
+  mutate(
+    modelo2 = case_when(
+      modelo2 == "fpca" ~ "Upsilon^{(0)}",
+      modelo2 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo2 == "pca_quad" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo2
+    )
+  )
+
+
+save(resultados_f0, distancias_f0, file = "resultados_condgram_f0.RData")
+
+```
+
+```{r}
+load("resultados_condgram_f0.RData")
+
+```
+
+
+
+```{r}
+library(ggplot2)
+
+# 1. Crear carpeta si no existe
+carpeta <- "plots_f0_fakeaudio/comparacion modelos numero cond f0"
+if (!dir.exists(carpeta)) {
+  dir.create(carpeta)
+}
+
+# ---- PLOT 1 ----
+p1 <- ggplot(resultados_f0, aes(x = nbasis, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según nbasis",
+       x = "nbasis", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
+       plot = p1, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 2 ----
+p2 <- ggplot(resultados_f0, aes(x = cond_psi, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_psi",
+       x = "cond_psi", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
+       plot = p2, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 3 ----
+p3 <- ggplot(resultados_f0, aes(x = cond_var_fd, y = AUC, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de AUC según cond_var_fd",
+       x = "cond_var_fd", y = "AUC ROC")
+
+ggsave(filename = file.path(carpeta, "AUC_vs_cond_var_fd.png"),
+       plot = p3, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 4 ----
+p4 <- ggplot(resultados_f0, aes(x = nbasis, y = cond_psi, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_psi según nbasis",
+       x = "nbasis", y = "cond_psi")
+
+ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
+       plot = p4, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 5 ----
+p5 <- ggplot(resultados_f0, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
+  geom_line(size = 1.2) +
+  geom_point() +
+  scale_color_discrete(labels = function(x) parse(text = x)) +
+  theme_minimal() +
+  labs(title = "Evolución de cond_var_fd según nbasis",
+       x = "nbasis", y = "cond_var_fd")
+
+ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
+       plot = p5, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 6 ----
+####### plot distancias #################
+dist_unicas <- distancias_f0 %>%
+  mutate(par = paste0(pmin(modelo1, modelo2), " - ", pmax(modelo1, modelo2))) %>%
+  filter(modelo1 != modelo2) %>%
+  distinct(nbasis, par, .keep_all = TRUE) 
+
+
+dist_unicas <- dist_unicas %>%
+  mutate(dist_total = dist_alpha + dist_beta + dist_gamma)
+
+dist_largo <- dist_unicas %>%
+  pivot_longer(cols = c(dist_alpha, dist_beta, dist_gamma, dist_total),
+               names_to = "tipo",
+               values_to = "distancia")
+
+
+# primero generamos el objeto dist_largo (ya lo tenés)
+# dist_largo tiene columnas: nbasis, par, tipo, distancia
+
+tipos <- unique(dist_largo$tipo)
+
+for(t in tipos){
+  
+  p <- dist_largo %>%
+    filter(tipo == t) %>%
+    ggplot(aes(x = nbasis, y = distancia,
+               color = par, linetype = par)) +
+    geom_line(size = 1.2) +
+    geom_point(size = 2) +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    guides(linetype = guide_none()) +
+    theme_minimal() +
+    labs(
+      title = paste("Evolución de", t, "según nbasis"),
+      x = "nbasis",
+      y = t,
+      color = "Comparación"
+    )
+  
+  ggsave(
+    filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
+    plot = p,
+    width = 7,
+    height = 5,
+    dpi = 300
+  )
+  
+}
+```
