@@ -475,7 +475,7 @@ params_Upsilon1 <- list(
     modelo_quad = TRUE
 )
 
-resultados_cardiotox = evaluar_modelos_distintas_bases(
+resultados_y_distancias_cardiotox <- evaluar_modelos_distintas_bases(
                                         data = list(X_train = X_train, 
                                                           X_valid = X_valid,
                                                           y_train = y_train,
@@ -486,6 +486,9 @@ resultados_cardiotox = evaluar_modelos_distintas_bases(
                                       Lcoef = c(2),
                                       params_Upsilon0 = params_Upsilon0,
                                       params_Upsilon1 = params_Upsilon1)
+
+resultados_cardiotox <- resultados_y_distancias_cardiotox$resultados
+distancias_cardiotox <- resultados_y_distancias_cardiotox$distancias
 
 
 ```
@@ -503,9 +506,34 @@ resultados_cardiotox <- resultados_cardiotox %>%
     )
   )
 
-save(resultados_cardiotox, file = "resultados_cardiotox.RData")
+distancias_cardiotox <- distancias_cardiotox %>%
+  mutate(
+    modelo1 = case_when(
+      modelo1 == "fpca" ~ "Upsilon^{(0)}",
+      modelo1 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo1 == "pca_quad" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo1
+    )
+  )
+distancias_cardiotox <- distancias_cardiotox %>%
+  mutate(
+    modelo2 = case_when(
+      modelo2 == "fpca" ~ "Upsilon^{(0)}",
+      modelo2 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo2 == "pca_quad" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo2
+    )
+  )
+
+save(resultados_cardiotox, distancias_cardiotox, file = "resultados_cardiotox.RData")
 
 ```
+
+```{r}
+load("resultados_cardiotox.RData")
+```
+
+
 
 ```{r}
 library(ggplot2)
@@ -575,6 +603,56 @@ p5 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = mode
 
 ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
        plot = p5, width = 7, height = 5, dpi = 300)
+
+# ---- PLOT 6 ----
+####### plot distancias #################
+dist_unicas <- distancias_cardiotox %>%
+  mutate(par = paste0(pmin(modelo1, modelo2), " - ", pmax(modelo1, modelo2))) %>%
+  filter(modelo1 != modelo2) %>%
+  distinct(nbasis, par, .keep_all = TRUE) 
+
+
+dist_unicas <- dist_unicas %>%
+  mutate(dist_total = dist_alpha + dist_beta + dist_gamma)
+
+dist_largo <- dist_unicas %>%
+  pivot_longer(cols = c(dist_alpha, dist_beta, dist_gamma, dist_total),
+               names_to = "tipo",
+               values_to = "distancia")
+
+
+# primero generamos el objeto dist_largo (ya lo tenés)
+# dist_largo tiene columnas: nbasis, par, tipo, distancia
+
+tipos <- unique(dist_largo$tipo)
+
+for(t in tipos){
+  
+  p <- dist_largo %>%
+    filter(tipo == t) %>%
+    ggplot(aes(x = nbasis, y = distancia,
+               color = par, linetype = par)) +
+    geom_line(size = 1.2) +
+    geom_point(size = 2) +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    guides(linetype = guide_none()) +
+    theme_minimal() +
+    labs(
+      title = paste("Evolución de", t, "según nbasis"),
+      x = "nbasis",
+      y = t,
+      color = "Comparación"
+    )
+  
+  ggsave(
+    filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
+    plot = p,
+    width = 7,
+    height = 5,
+    dpi = 300
+  )
+  
+}
 
 ```
 

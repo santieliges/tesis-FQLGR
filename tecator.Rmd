@@ -502,7 +502,7 @@ params_Upsilon1 <- list(
     var_threshold = 0.9,
     modelo_quad = TRUE
 )
-resultados_tecator = evaluar_modelos_distintas_bases(
+resultados_y_distancias_tecator = evaluar_modelos_distintas_bases(
                                         data = list(X_train = X_train, 
                                                           X_valid = X_valid,
                                                           y_train = y_train,
@@ -513,6 +513,9 @@ resultados_tecator = evaluar_modelos_distintas_bases(
                                       Lcoef = c(3),
                                       params_Upsilon0 = params_Upsilon0,
                                       params_Upsilon1 = params_Upsilon1)
+
+resultados_tecator <- resultados_y_distancias_tecator$resultados
+distancias_tecator <- resultados_y_distancias_tecator$distancias
 
 
 ```
@@ -530,10 +533,6 @@ save(
   file = "modelos_tecator.RData"
 )
 
-save(
-  resultados_tecator,
-  file = "resultados_cond_tecator.RData"
-)
 
 ```
 
@@ -551,9 +550,35 @@ resultados_tecator <- resultados_tecator %>%
     )
   )
 
-save(resultados_tecator, file = "resultados_cond_tecator.RData")
+distancias_tecator <- distancias_tecator %>%
+  mutate(
+    modelo1 = case_when(
+      modelo1 == "fpca" ~ "Upsilon^{(0)}",
+      modelo1 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo1 == "pca_quad" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo1
+    )
+  )
+distancias_tecator <- distancias_tecator %>%
+  mutate(
+    modelo2 = case_when(
+      modelo2 == "fpca" ~ "Upsilon^{(0)}",
+      modelo2 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
+      modelo2 == "pca_quad" ~ "Upsilon^{(1)}",
+      TRUE ~ modelo2
+    )
+  )
+
+save(resultados_tecator, distancias_tecator, file = "resultados_cond_tecator.RData")
 
 ```
+
+```{r}
+load("resultados_cond_tecator.RData")
+
+```
+
+
 
 ```{r}
 library(ggplot2)
@@ -651,7 +676,55 @@ p5 <- ggplot(resultados_tecator,
 
 ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
        plot = p5, width = 7, height = 5, dpi = 300)
+# ---- PLOT 6 ----
+####### plot distancias #################
+dist_unicas <- distancias_tecator %>%
+  mutate(par = paste0(pmin(modelo1, modelo2), " - ", pmax(modelo1, modelo2))) %>%
+  filter(modelo1 != modelo2) %>%
+  distinct(nbasis, par, .keep_all = TRUE) 
 
+
+dist_unicas <- dist_unicas %>%
+  mutate(dist_total = dist_alpha + dist_beta + dist_gamma)
+
+dist_largo <- dist_unicas %>%
+  pivot_longer(cols = c(dist_alpha, dist_beta, dist_gamma, dist_total),
+               names_to = "tipo",
+               values_to = "distancia")
+
+
+# primero generamos el objeto dist_largo (ya lo tenés)
+# dist_largo tiene columnas: nbasis, par, tipo, distancia
+
+tipos <- unique(dist_largo$tipo)
+
+for(t in tipos){
+  
+  p <- dist_largo %>%
+    filter(tipo == t) %>%
+    ggplot(aes(x = nbasis, y = distancia,
+               color = par, linetype = par)) +
+    geom_line(size = 1.2) +
+    geom_point(size = 2) +
+    scale_color_discrete(labels = function(x) parse(text = x)) +
+    guides(linetype = guide_none()) +
+    theme_minimal() +
+    labs(
+      title = paste("Evolución de", t, "según nbasis"),
+      x = "nbasis",
+      y = t,
+      color = "Comparación"
+    )
+  
+  ggsave(
+    filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
+    plot = p,
+    width = 7,
+    height = 5,
+    dpi = 300
+  )
+  
+}
 ```
 
 ```{r}

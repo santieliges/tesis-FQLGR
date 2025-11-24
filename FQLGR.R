@@ -59,7 +59,7 @@ predecir_probabilidades_validacion <- function(res, fd_valid_centered, estimatio
   return(y_prob_valid)
 }
 
-evaluar_modelos_distintas_bases <- function(
+  evaluar_modelos_distintas_bases <- function(
     data = list(),
     basises = list(),
     densidades_grillas = c(),
@@ -73,6 +73,14 @@ evaluar_modelos_distintas_bases <- function(
   library(pROC)
   set.seed(seed)
   resultados <- data.frame()
+  distancias_df <- tibble::tibble(
+    nbasis = numeric(),
+    modelo1 = character(),
+    modelo2 = character(),
+    dist_alpha = numeric(),
+    dist_beta = numeric(),
+    dist_gamma = numeric()
+  )
   
   # Utilidad: extrae un parámetro, o usa un valor por defecto
   get_param <- function(lst, name, default) {
@@ -196,30 +204,35 @@ evaluar_modelos_distintas_bases <- function(
       y_prob_pca <- predecir_probabilidades_validacion(
         res_pca_quad, fd_valid_centered, basis, modo = "PCA")
       
-      # # =======================
-      # #   Distancia entre parametros estimados
-      # # =======================
-      # 
-      # # Lista de modelos a comparar
-      # modelos <- list(
-      #   fpca = modelo_fpca,
-      #   equiv = modelo_fpca_equiv,
-      #   pca1 = res_pca_quad
-      # )
-      # 
-      # # Creamos una matriz para guardar distancias
-      # n <- length(modelos)
-      # distancias <- matrix(0, nrow = n, ncol = n,
-      #                      dimnames = list(names(modelos), names(modelos)))
-      # 
-      # # Llenar la matriz con distancias euclídeas
-      # for (i in 1:n) {
-      #   for (j in 1:n) {
-      #     distancias[i, j] <- distancia_euclidea(modelos[[i]], modelos[[j]])
-      #   }
-      # }
-      # 
-      # 
+      # =======================
+      # Distancias entre parametros
+      # =======================
+      modelos <- list(
+        fpca       = modelo_fpca,
+        equiv      = modelo_fpca_equiv,
+        pca_quad   = res_pca_quad
+      )
+      
+      n_mod <- length(modelos)
+      
+      for (i in 1:n_mod) {
+        for (j in 1:n_mod) {
+          
+          m1 <- modelos[[i]]
+          m2 <- modelos[[j]]
+          
+          distancias_df <- distancias_df %>% add_row(
+            nbasis = nb,
+            modelo1 = names(modelos)[i],
+            modelo2 = names(modelos)[j],
+            dist_alpha = abs(m1$alpha - m2$alpha),
+            dist_beta  = dist_euclidea(m1$beta, m2$beta),
+            dist_gamma = dist_euclidea(as.vector(m1$gamma), as.vector(m2$gamma))
+          )
+          
+        }
+      }
+      
       resultados <- rbind(
         resultados,
         data.frame(
@@ -258,7 +271,7 @@ evaluar_modelos_distintas_bases <- function(
     }
   }
   
-  return(resultados)
+  return(list(resultados = resultados, distancias = distancias_df))
 }
 
 
