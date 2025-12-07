@@ -72,6 +72,7 @@ nbasis=15
 freq_range <- range(t)  # rango de las longitudes de onda
 #Lcoef <- c(0, (2*pi/diff(freq_range))^2, 0)
 #harmacclLfd <- vec2Lfd(Lcoef, freq_range)
+harmacclLfd <- vec2Lfd(c(0), freq_range)
 estimationBasis <- create.fourier.basis(rangeval = freq_range, nbasis = nbasis)
 #fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLfd)
 fdPar_obj <- fdPar(estimationBasis)
@@ -83,6 +84,67 @@ fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdParobj = fdPar_obj)$fd
 fd_valid_centered <- center.fd(fd_valid)
 
 ```
+
+
+```{r}
+library(fda)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Evalúo las curvas centradas
+t_grid <- t  # podés usar algo más fino p.ej. seq(min(t), max(t), length=300)
+
+eval_train <- eval.fd(t_grid, fd_train_centered)  # matriz: length(t_grid) x n_train
+
+# Convertir a data frame largo
+df_train_plot <- as.data.frame(eval_train)
+df_train_plot$argvals <- t_grid
+
+df_train_plot <- df_train_plot %>%
+  pivot_longer(cols = -argvals, 
+               names_to = "curve",
+               values_to = "value") %>%
+  mutate(curve = as.numeric(gsub("V", "", curve)),
+         class = y_train[curve])
+
+ggplot(df_train_plot, aes(x = argvals, y = value, group = curve, color = factor(class))) +
+  geom_line(alpha = 0.7) +
+  scale_color_manual(values = c("blue", "red"), 
+                     labels = c("Clase 0", "Clase 1"),
+                     name = "Clase") +
+  theme_minimal() +
+  labs(
+    title = "Curvas funcionales centradas (Train)",
+    x = "Longitud de onda",
+    y = "Absorción (centrada)"
+  ) +
+  theme(
+    text = element_text(size = 14),
+    legend.title = element_text(face = "bold"),
+    legend.text  = element_text(face = "bold"),
+    axis.title   = element_text(face = "bold"),
+    plot.title   = element_text(face = "bold", size = 16)
+  )
+
+```
+
+```{r}
+library(ggplot2)
+
+fat <- tecator$y$Fat
+
+ggplot(data.frame(Fat = fat), aes(x = Fat)) +
+  geom_density(fill = "lightblue", alpha = 0.5) +
+  geom_vline(xintercept = threshold, linetype = "dashed", size = 1) +
+  labs(title = "Densidad del % de grasa",
+       subtitle = paste("Mediana =", round(threshold,2)),
+       x = "% de grasa",
+       y = "Densidad") +
+  theme_minimal()
+
+```
+
 
 # Entrenamiento
 
@@ -97,7 +159,7 @@ fd_valid_centered <- center.fd(fd_valid)
       
 
 modelo_fpca <- fpca_Upsilon0(
-    fd_centered= fd_train,
+    fd_centered= fd_train_centered,
     y= y_train,
     beta = beta_init,
     gamma = gamma_init,
@@ -144,9 +206,32 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 10000, var_threshold = 0.9, LdPenalization = harmacclLfd, lambda_lin = 0.01, lambda_quad = 0.001)
+res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,
+                                  y = y_train, 
+                                  beta = beta_init, 
+                                  gamma = gamma_init,
+                                  alpha = alpha_init,
+                                  basis = estimationBasis,
+                                  step_gradient = 0.001, 
+                                  iterations = 10000,
+                                  var_threshold = 0.9, 
+                                  LdPenalization = harmacclLfd, 
+                                  lambda_lin = 0.01, 
+                                  lambda_quad = 0.001)
 
-res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.001, iterations = 10000, var_threshold = 0.9, LdPenalization = harmacclLfd, lambda_lin = 0.01, lambda_quad = 0.001, modelo_quad = FALSE)
+res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,
+                                    y = y_train, 
+                                    beta = beta_init,
+                                    gamma = gamma_init,
+                                    alpha = alpha_init,
+                                    basis = estimationBasis,
+                                    step_gradient = 0.001,
+                                    iterations = 10000,
+                                    var_threshold = 0.9,
+                                    LdPenalization = harmacclLfd,
+                                    lambda_lin = 0.01,
+                                    lambda_quad = 0.001,
+                                    modelo_quad = FALSE)
 ```
 
 
@@ -156,9 +241,34 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,y = y_train, beta = beta_init,gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.09, iterations = 10000, LdPenalization = harmacclLfd, lambda_lin = 0, lambda_quad = 0, nt = 4, scale = TRUE)
+res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,
+                                y = y_train,
+                                beta = beta_init,
+                                gamma = gamma_init,
+                                alpha = alpha_init,
+                                basis = estimationBasis,
+                                step_gradient = 0.09, 
+                                iterations = 10000,
+                                LdPenalization = harmacclLfd, 
+                                lambda_lin = 0, 
+                                lambda_quad = 0, 
+                                nt = 4, 
+                                scale = TRUE)
 
-res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,y = y_train, beta = beta_init,gamma = gamma_init, alpha = alpha_init, basis = estimationBasis, step_gradient = 0.09, iterations = 10000, LdPenalization = harmacclLfd, modelo_quad = FALSE, lambda_lin = 0, lambda_quad = 0, nt = 4, scale = TRUE)
+res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,
+                                  y = y_train, 
+                                  beta = beta_init,
+                                  gamma = gamma_init,
+                                  alpha = alpha_init,
+                                  basis = estimationBasis,
+                                  step_gradient = 0.09,
+                                  iterations = 10000,
+                                  LdPenalization = harmacclLfd,
+                                  modelo_quad = FALSE,
+                                  lambda_lin = 0, 
+                                  lambda_quad = 0,
+                                  nt = 4,
+                                  scale = TRUE)
 
 ```
 
