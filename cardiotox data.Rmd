@@ -257,7 +257,16 @@ cat("AUC-PR base fpca lineal:    ", round(auc_pr_base_fpca_noquad, 4), "\n")
 # Abrir el dispositivo gráfico
 png("plots_cardiotox/curvas_pr_comparacion_modelos.png", width = 800, height = 600, res = 120)
 
-
+# --- Mejorar ejes ---
+par(
+  cex.axis = 1.3,      # tamaño números eje
+  col.axis = "black",  # color
+  font.axis = 2,       # <<< NÚMEROS DE LOS EJES EN NEGRITA
+  cex.lab = 1.4,       # tamaño etiquetas eje
+  col.lab = "black",
+  font.lab = 2,        # <<< ETIQUETAS "x" y "y" EN NEGRITA
+  lwd = 1.5            # ejes un poco más gruesos (opcional)
+)
 # --- Graficar todas las curvas PR ---
 plot(pr_pca$curve[,1], pr_pca$curve[,2], type = "l", col = "darkgreen", lwd = 2,
      xlab = "Recall", ylab = "Precision", main = "Curvas PR - Validación",
@@ -337,7 +346,16 @@ cat("AUROC base fpca lineal: ", round(auc_base_fpca_noquad, 4), "\n")
 # Abrir el dispositivo gráfico
 png("plots_cardiotox/curvas_roc_comparacion_modelos.png", width = 800, height = 600, res = 120)
 
-
+# --- Mejorar ejes ---
+par(
+  cex.axis = 1.3,      # tamaño números eje
+  col.axis = "black",  # color
+  font.axis = 2,       # <<< NÚMEROS DE LOS EJES EN NEGRITA
+  cex.lab = 1.4,       # tamaño etiquetas eje
+  col.lab = "black",
+  font.lab = 2,        # <<< ETIQUETAS "x" y "y" EN NEGRITA
+  lwd = 1.5            # ejes un poco más gruesos (opcional)
+)
 plot(roc_pca,    col = "darkgreen", lwd = 2, main = "Curvas ROC - Validacion", legacy.axes = TRUE)
 lines(roc_pca_noquad,    col = "lightgreen", lwd = 2, lty = 3)
 lines(roc_noPCA, col = "darkred",   lwd = 2, lty = 1)
@@ -537,6 +555,13 @@ load("resultados_cardiotox.RData")
 
 ```{r}
 library(ggplot2)
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16, face = "bold"),
+  legend.text  = element_text(size = 14, face = "bold")
+)
 
 # 1. Crear carpeta si no existe
 carpeta <- "plots_cardiotox/comparacion modelos numero cond cardiotox"
@@ -551,7 +576,8 @@ p1 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = AUC, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
-       x = "nbasis", y = "AUC ROC")
+       x = "nbasis", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p1, width = 7, height = 5, dpi = 300)
@@ -563,7 +589,8 @@ p2 <- ggplot(resultados_cardiotox, aes(x = cond_psi, y = AUC, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_psi",
-       x = "cond_psi", y = "AUC ROC")
+       x = "cond_psi", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
        plot = p2, width = 7, height = 5, dpi = 300)
@@ -575,7 +602,8 @@ p3 <- ggplot(resultados_cardiotox, aes(x = cond_var_fd, y = AUC, color = modelo)
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_var_fd",
-       x = "cond_var_fd", y = "AUC ROC")
+       x = "cond_var_fd", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_cond_var_fd.png"),
        plot = p3, width = 7, height = 5, dpi = 300)
@@ -587,7 +615,8 @@ p4 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_psi, color = modelo)
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "cond_psi")
+       x = "nbasis", y = "cond_psi") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
@@ -599,7 +628,8 @@ p5 <- ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = mode
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_var_fd según nbasis",
-       x = "nbasis", y = "cond_var_fd")
+       x = "nbasis", y = "cond_var_fd") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
        plot = p5, width = 7, height = 5, dpi = 300)
@@ -609,8 +639,7 @@ ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
 dist_unicas <- distancias_cardiotox %>%
   mutate(par = paste0(pmin(modelo1, modelo2), " - ", pmax(modelo1, modelo2))) %>%
   filter(modelo1 != modelo2) %>%
-  distinct(nbasis, par, .keep_all = TRUE) 
-
+  distinct(nbasis, par, .keep_all = TRUE)
 
 dist_unicas <- dist_unicas %>%
   mutate(dist_total = dist_alpha + dist_beta + dist_gamma)
@@ -620,44 +649,72 @@ dist_largo <- dist_unicas %>%
                names_to = "tipo",
                values_to = "distancia")
 
+convert_to_plotmath <- function(expr_string) {
+  out <- try(parse(text = expr_string), silent = TRUE)
+  if(inherits(out, "try-error")) return(expr_string)
+  expr_string
+}
 
-# primero generamos el objeto dist_largo (ya lo tenés)
-# dist_largo tiene columnas: nbasis, par, tipo, distancia
+dist_largo2 <- dist_largo %>%
+  mutate(
+    expr1 = sapply(modelo1, convert_to_plotmath),
+    expr2 = sapply(modelo2, convert_to_plotmath),
+    par_expr = paste(expr1, "-", expr2)
+  )
 
-tipos <- unique(dist_largo$tipo)
+tipos <- unique(dist_largo2$tipo)
+label_map <- c(
+  dist_alpha = "Delta * alpha",
+  dist_beta  = "Delta * beta",
+  dist_gamma = "Delta * gamma",
+  dist_total = "Delta * total"
+)
 
 for(t in tipos){
-  
-  p <- dist_largo %>%
+
+  title_expr <- substitute(
+    paste("Evolución de ", LBL, " según nbasis"),
+    list(LBL = parse(text = label_map[[t]])[[1]])
+  )
+
+  p <- dist_largo2 %>%
     filter(tipo == t) %>%
     ggplot(aes(x = nbasis, y = distancia,
-               color = par, linetype = par)) +
+               color = par_expr, linetype = par_expr)) +
     geom_line(size = 1.2) +
     geom_point(size = 2) +
-    scale_color_discrete(labels = function(x) parse(text = x)) +
-    guides(linetype = guide_none()) +
     theme_minimal() +
     labs(
-      title = paste("Evolución de", t, "según nbasis"),
+      title = title_expr,
       x = "nbasis",
-      y = t,
+      y = NULL,
       color = "Comparación"
-    )
+    ) +
+    scale_color_discrete(labels = scales::label_parse()) +
+    guides(linetype = guide_none()) +
+    ylab(parse(text = label_map[[t]])) +
+  tema_negrita
   
   ggsave(
     filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
     plot = p,
-    width = 7,
-    height = 5,
-    dpi = 300
+    width = 7, height = 5, dpi = 300
   )
-  
 }
+
 
 ```
 
 ```{r}
 library(ggplot2)
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16, face = "bold"),
+  legend.text  = element_text(size = 14, face = "bold")
+)
+
 
 ggplot(resultados_cardiotox, aes(x = nbasis, y = AUC, color = modelo)) +
   geom_line(size = 1.2) +
@@ -665,7 +722,8 @@ ggplot(resultados_cardiotox, aes(x = nbasis, y = AUC, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
-       x = "nbasis", y = "AUC ROC")
+       x = "nbasis", y = "AUC ROC") +
+  tema_negrita
 
 ggplot(resultados_cardiotox, aes(x = cond_psi, y = AUC, color = modelo)) +
   geom_line(size = 1.2) +
@@ -673,7 +731,9 @@ ggplot(resultados_cardiotox, aes(x = cond_psi, y = AUC, color = modelo)) +
     scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_psi",
-       x = "cond_psi", y = "AUC ROC")
+       x = "cond_psi", y = "AUC ROC") +
+  tema_negrita
+
 
 ggplot(resultados_cardiotox, aes(x = cond_var_fd, y = AUC, color = modelo)) +
   geom_line(size = 1.2) +
@@ -681,7 +741,9 @@ ggplot(resultados_cardiotox, aes(x = cond_var_fd, y = AUC, color = modelo)) +
     scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_var_fd",
-       x = "cond_var_fd", y = "AUC ROC")
+       x = "cond_var_fd", y = "AUC ROC") +
+  tema_negrita
+
 
 ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_psi, color = modelo)) +
   geom_line(size = 1.2) +
@@ -689,7 +751,8 @@ ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_psi, color = modelo)) +
   theme_minimal() +
     scale_color_discrete(labels = function(x) parse(text = x)) +
   labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "cond_psi")
+       x = "nbasis", y = "cond_psi") +
+  tema_negrita
 
 ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
   geom_line(size = 1.2) +
@@ -697,7 +760,9 @@ ggplot(resultados_cardiotox, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
     scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_var_fd según nbasis",
-       x = "nbasis", y = "cond_var_fd")
+       x = "nbasis", y = "cond_var_fd") +
+  tema_negrita
+
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

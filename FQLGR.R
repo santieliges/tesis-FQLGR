@@ -278,53 +278,57 @@ predecir_probabilidades_validacion <- function(res, fd_valid_centered, estimatio
 #################################### funciones auxiliares para exportar graficos ############################
 
 #### Exportar gráficos para tesis (sin títulos) ####
-exportar_plot_beta_full <- function(t_grid, beta_true = NULL, beta_est, title_suffix = "", output_filename = "beta_plot.png") {
-  library(ggplot2)
-  library(reshape2)
-  
-  # Crear el dataframe base con el estimado
-  df_beta <- data.frame(
-    t        = t_grid,
-    Estimado = beta_est
-  )
-  
-  # Agregar la curva verdadera solo si se pasó como argumento válido
-  if (!is.null(beta_true)) {
-    df_beta$Original <- beta_true
+  exportar_plot_beta_full <- function(t_grid, beta_true = NULL, beta_est, 
+                                      title_suffix = "", output_filename = "beta_plot.png") {
+    library(ggplot2)
+    library(reshape2)
+    
+    # Dataframe base
+    df_beta <- data.frame(
+      t        = t_grid,
+      Estimado = beta_est
+    )
+    
+    if (!is.null(beta_true)) {
+      df_beta$Original <- beta_true
+    }
+    
+    # Formato largo
+    df_beta_long <- reshape2::melt(
+      df_beta, id.vars = "t",
+      variable.name = "Modelo",
+      value.name   = "beta"
+    )
+    
+    # Plot
+    p <- ggplot(df_beta_long, aes(x = t, y = beta, color = Modelo, linetype = Modelo)) +
+      geom_line(size = 1) +
+      scale_color_manual(values = c("Original" = "black", "Estimado" = "darkred")) +
+      scale_linetype_manual(values = c("Original" = "solid", "Estimado" = "solid")) +
+      labs(x = "t", y = expression(beta(t))) +
+      theme_minimal() +
+      theme(
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        plot.title = element_blank(),
+        
+        # ---- NÚMEROS Y TÍTULOS DE EJES EN NEGRITA ----
+        axis.text  = element_text(size = 16, colour = "black", face = "bold"),
+        axis.title = element_text(size = 16, colour = "black", face = "bold")
+      )
+    
+    ggsave(filename = output_filename, plot = p, width = 6, height = 4, dpi = 300)
+    message(paste("Gráfico β(t) guardado como:", output_filename))
   }
   
-  # Pasar a formato largo (solo incluir columnas que existen)
-  df_beta_long <- reshape2::melt(df_beta, id.vars = "t",
-                                 variable.name = "Modelo",
-                                 value.name = "beta")
-  
-  # Crear el gráfico
-  p <- ggplot(df_beta_long, aes(x = t, y = beta, color = Modelo, linetype = Modelo)) +
-    geom_line(size = 1) +
-    scale_color_manual(values = c("Original" = "black", "Estimado" = "darkred")) +
-    scale_linetype_manual(values = c("Original" = "solid", "Estimado" = "solid")) +
-    labs(x = "t", y = expression(beta(t))) +
-    theme_minimal() +
-    theme(
-      legend.position = "bottom",
-      legend.title = element_blank(),
-      plot.title = element_blank()
-    )
-  
-  # Guardar el gráfico
-  ggsave(filename = output_filename, plot = p, width = 6, height = 4, dpi = 300)
-  message(paste("Gráfico β(t) guardado como:", output_filename))
-}
-
 
 exportar_gamma_contour_full <- function(t_grid, gamma, title_suffix = "", 
-                                        output_filename = "gamma_contour.png"
-) {
+                                        output_filename = "gamma_contour.png") {
   library(ggplot2)
   library(reshape2)
   library(viridis)
+  library(grid)  # para unit()
   
-  # Función auxiliar para preparar el dataframe
   prep_gamma <- function(mat, tipo) {
     df <- reshape2::melt(mat)
     colnames(df) <- c("s_idx", "t_idx", "gamma")
@@ -334,14 +338,13 @@ exportar_gamma_contour_full <- function(t_grid, gamma, title_suffix = "",
     return(df)
   }
   
-  # Si 'gamma' es una lista con varios tipos
   if (is.list(gamma)) {
-    df_gamma <- do.call(rbind, lapply(names(gamma), function(tipo) prep_gamma(gamma[[tipo]], tipo)))
+    df_gamma <- do.call(rbind,
+                        lapply(names(gamma), function(tipo) prep_gamma(gamma[[tipo]], tipo)))
   } else {
     df_gamma <- prep_gamma(gamma, "gamma")
   }
   
-  # Crear el gráfico sin título
   p <- ggplot(df_gamma, aes(x = t, y = s, z = gamma)) +
     geom_contour_filled(aes(fill = ..level..), bins = 20) +
     facet_wrap(~ Tipo, nrow = 1) +
@@ -349,13 +352,23 @@ exportar_gamma_contour_full <- function(t_grid, gamma, title_suffix = "",
     labs(x = "t", y = "s") +
     theme_minimal() +
     theme(
-      strip.text = element_text(size = 10),
-      axis.text  = element_text(size = 6)
+      strip.text = element_text(size = 12),
+      
+      axis.text  = element_text(size = 17, colour = "black", face = "bold"),
+      axis.title = element_text(size = 16, colour = "black", face = "bold"),
+      
+      legend.title = element_text(size = 9),
+      legend.text  = element_text(size = 8),
+      
+      legend.key.height = unit(0.3, "cm"),
+      legend.key.width  = unit(0.3, "cm"),
+      legend.spacing.y  = unit(0.2, "cm")
     )
   
   ggsave(filename = output_filename, plot = p, width = 8, height = 4, dpi = 300)
   message(paste("Gráfico γ(s,t) guardado como:", output_filename))
 }
+
 
 exportar_plot_gamma_3d_full <- function(
     t_grid, gamma, title_suffix = "", output_filename = "gamma_3d.png",
@@ -393,7 +406,7 @@ exportar_plot_gamma_3d_full <- function(
   zmin <- min(gamma_mat, na.rm = TRUE)
   zmax <- max(gamma_mat, na.rm = TRUE)
   ncol <- 100
-  colfunc <- colorRampPalette(rev(brewer.pal(9, palette_name)))  # más saturado
+  colfunc <- colorRampPalette(rev(brewer.pal(9, palette_name)))
   col_z <- colfunc(ncol)[as.numeric(cut(gamma_mat, breaks = ncol))]
   
   # --- Configuración del dispositivo ---
@@ -411,11 +424,21 @@ exportar_plot_gamma_3d_full <- function(
     box = TRUE, zlim = c(zmin, zmax),
     ticktype = "detailed",
     xlab = "t", ylab = "s", zlab = expression(gamma(s,t)),
-    cex.axis = 0.7, cex.lab = 0.8
+    
+    # --- Números de los ejes ---
+    cex.axis = 1.4,
+    col.axis = "black",
+    font.axis = 2,     # <<--- NEGRITA
+    
+    # --- Títulos de ejes ---
+    cex.lab = 1.6,
+    col.lab = "black",
+    font.lab = 2       # <<--- NEGRITA
   )
   
   message(paste("Gráfico 3D guardado como:", output_filename))
 }
+
 
 ########################################## funciones auxiliares para operar matrices #########################
 

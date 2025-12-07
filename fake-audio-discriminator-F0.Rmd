@@ -257,8 +257,8 @@ if (file.exists(archivo_datos)) {
 
 ```{r}
 # Dominio
-t <- 1:1025
-freq_range <- c(1, 1025)
+t <- 1:1024
+freq_range <- c(1, 1024)
 
 # Parámetros de la base B-spline
 nbasis <- 80
@@ -285,13 +285,13 @@ fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLdf)
 
 # Entrenamiento
 Y_train <- as.numeric(df_F0_training_completo$clase)
-X_train <- df_F0_training_completo #%>% select(-clase)
+X_train <- df_F0_training_completo %>% select(-clase)
 fd_train <- smooth.basis(argvals = t, y = t(X_train), fdPar_obj)$fd
 fd_train_centered <- center.fd(fd_train)
 
 # Test
 Y_valid <- as.numeric(df_F0_testing_completo$clase)
-X_valid <- df_F0_testing_completo #%>% select(-clase)
+X_valid <- df_F0_testing_completo %>% select(-clase)
 fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdPar_obj)$fd
 fd_valid_centered <- center.fd(fd_valid)
 
@@ -521,7 +521,16 @@ cat("AUC-PR base fpca lineal:    ", round(auc_pr_base_fpca_noquad, 4), "\n")
 #----- abro para la desscarga ----
 # Abrir el dispositivo gráfico
 png("plots_F0_fakeaudio/curvas_pr_comparacion_modelos.png", width = 800, height = 600, res = 120)
-
+# --- Mejorar ejes ---
+par(
+  cex.axis = 1.3,      # tamaño números eje
+  col.axis = "black",  # color
+  font.axis = 2,       # <<< NÚMEROS DE LOS EJES EN NEGRITA
+  cex.lab = 1.4,       # tamaño etiquetas eje
+  col.lab = "black",
+  font.lab = 2,        # <<< ETIQUETAS "x" y "y" EN NEGRITA
+  lwd = 1.5            # ejes un poco más gruesos (opcional)
+)
 
 # --- Graficar todas las curvas PR ---
 plot(pr_pca$curve[,1], pr_pca$curve[,2], type = "l", col = "darkgreen", lwd = 2,
@@ -621,7 +630,16 @@ cat("AUROC base fpca lineal: ", round(auc_base_fpca_noquad, 4), "\n")
 #----- abro para la desscarga ----
 # Abrir el dispositivo gráfico
 png("plots_F0_fakeaudio/curvas_roc_comparacion_modelos.png", width = 800, height = 600, res = 120)
-
+# --- Mejorar ejes ---
+par(
+  cex.axis = 1.3,      # tamaño números eje
+  col.axis = "black",  # color
+  font.axis = 2,       # <<< NÚMEROS DE LOS EJES EN NEGRITA
+  cex.lab = 1.4,       # tamaño etiquetas eje
+  col.lab = "black",
+  font.lab = 2,        # <<< ETIQUETAS "x" y "y" EN NEGRITA
+  lwd = 1.5            # ejes un poco más gruesos (opcional)
+)
 
 plot(roc_pca,    col = "darkgreen", lwd = 2, main = "Curvas ROC - Validacion", legacy.axes = TRUE)
 lines(roc_pca_noquad,    col = "lightgreen", lwd = 2, lty = 3)
@@ -842,7 +860,7 @@ save(resultados_f0, distancias_f0, file = "resultados_condgram_f0.RData")
 
 ```{r}
 load("resultados_condgram_f0.RData")
-
+load( "modelos_F0.RData")
 ```
 
 
@@ -850,6 +868,13 @@ load("resultados_condgram_f0.RData")
 ```{r}
 library(ggplot2)
 
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16, face = "bold"),
+  legend.text  = element_text(size = 14, face = "bold")
+)
 # 1. Crear carpeta si no existe
 carpeta <- "plots_f0_fakeaudio/comparacion modelos numero cond f0"
 if (!dir.exists(carpeta)) {
@@ -863,7 +888,8 @@ p1 <- ggplot(resultados_f0, aes(x = nbasis, y = AUC, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
-       x = "nbasis", y = "AUC ROC")
+       x = "nbasis", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p1, width = 7, height = 5, dpi = 300)
@@ -875,7 +901,8 @@ p2 <- ggplot(resultados_f0, aes(x = cond_psi, y = AUC, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_psi",
-       x = "cond_psi", y = "AUC ROC")
+       x = "cond_psi", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
        plot = p2, width = 7, height = 5, dpi = 300)
@@ -887,7 +914,8 @@ p3 <- ggplot(resultados_f0, aes(x = cond_var_fd, y = AUC, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_var_fd",
-       x = "cond_var_fd", y = "AUC ROC")
+       x = "cond_var_fd", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_cond_var_fd.png"),
        plot = p3, width = 7, height = 5, dpi = 300)
@@ -899,7 +927,8 @@ p4 <- ggplot(resultados_f0, aes(x = nbasis, y = cond_psi, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "cond_psi")
+       x = "nbasis", y = "cond_psi") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
@@ -911,7 +940,8 @@ p5 <- ggplot(resultados_f0, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_var_fd según nbasis",
-       x = "nbasis", y = "cond_var_fd")
+       x = "nbasis", y = "cond_var_fd") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
        plot = p5, width = 7, height = 5, dpi = 300)
@@ -921,8 +951,7 @@ ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
 dist_unicas <- distancias_f0 %>%
   mutate(par = paste0(pmin(modelo1, modelo2), " - ", pmax(modelo1, modelo2))) %>%
   filter(modelo1 != modelo2) %>%
-  distinct(nbasis, par, .keep_all = TRUE) 
-
+  distinct(nbasis, par, .keep_all = TRUE)
 
 dist_unicas <- dist_unicas %>%
   mutate(dist_total = dist_alpha + dist_beta + dist_gamma)
@@ -932,39 +961,59 @@ dist_largo <- dist_unicas %>%
                names_to = "tipo",
                values_to = "distancia")
 
+convert_to_plotmath <- function(expr_string) {
+  out <- try(parse(text = expr_string), silent = TRUE)
+  if(inherits(out, "try-error")) return(expr_string)
+  expr_string
+}
 
-# primero generamos el objeto dist_largo (ya lo tenés)
-# dist_largo tiene columnas: nbasis, par, tipo, distancia
+dist_largo2 <- dist_largo %>%
+  mutate(
+    expr1 = sapply(modelo1, convert_to_plotmath),
+    expr2 = sapply(modelo2, convert_to_plotmath),
+    par_expr = paste(expr1, "-", expr2)
+  )
 
-tipos <- unique(dist_largo$tipo)
+tipos <- unique(dist_largo2$tipo)
+label_map <- c(
+  dist_alpha = "Delta * alpha",
+  dist_beta  = "Delta * beta",
+  dist_gamma = "Delta * gamma",
+  dist_total = "Delta * total"
+)
 
 for(t in tipos){
-  
-  p <- dist_largo %>%
+
+  title_expr <- substitute(
+    paste("Evolución de ", LBL, " según nbasis"),
+    list(LBL = parse(text = label_map[[t]])[[1]])
+  )
+
+  p <- dist_largo2 %>%
     filter(tipo == t) %>%
     ggplot(aes(x = nbasis, y = distancia,
-               color = par, linetype = par)) +
+               color = par_expr, linetype = par_expr)) +
     geom_line(size = 1.2) +
     geom_point(size = 2) +
-    scale_color_discrete(labels = function(x) parse(text = x)) +
-    guides(linetype = guide_none()) +
     theme_minimal() +
     labs(
-      title = paste("Evolución de", t, "según nbasis"),
+      title = title_expr,
       x = "nbasis",
-      y = t,
+      y = NULL,
       color = "Comparación"
-    )
+    ) +
+    scale_color_discrete(labels = scales::label_parse()) +
+    guides(linetype = guide_none()) +
+    ylab(parse(text = label_map[[t]])) +
+  tema_negrita
   
   ggsave(
     filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
     plot = p,
-    width = 7,
-    height = 5,
-    dpi = 300
+    width = 7, height = 5, dpi = 300
   )
-  
 }
+
 ```
 
 ```{r}
@@ -1014,6 +1063,81 @@ ggplot(resultados_f0, aes(x = nbasis, y = cond_var_fd, color = modelo)) +
 
   labs(title = "Evolución de cond_var_fd según nbasis",
        x = "nbasis", y = "cond_var_fd")
+
+```
+```{r}
+library(fda)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# === 1. Separar las curvas por clase ===
+idx_0 <- which(y_train == 0)
+idx_1 <- which(y_train == 1)
+
+fd_0 <- fd(coef = fd_train_centered$coefs[, idx_0],
+           basisobj = fd_train_centered$basis)
+
+fd_1 <- fd(coef = fd_train_centered$coefs[, idx_1],
+           basisobj = fd_train_centered$basis)
+
+# === 2. FPCA por clase ===
+nharm <- 5 # cantidad de funciones principales a graficar
+
+pca_0 <- pca.fd(fd_0, nharm = nharm)
+pca_1 <- pca.fd(fd_1, nharm = nharm)
+
+harm_0 <- pca_0$harmonics
+harm_1 <- pca_1$harmonics
+
+# === 3. Grilla común ===
+t_grid <- seq(fd_train_centered$basis$rangeval[1],
+              fd_train_centered$basis$rangeval[2],
+              length.out = 400)
+
+# === 4. Evaluar funciones principales por clase ===
+eval_0 <- eval.fd(t_grid, harm_0)
+eval_1 <- eval.fd(t_grid, harm_1)
+
+# --- clase 0 ---
+df0 <- data.frame(t = t_grid, eval_0)
+colnames(df0) <- c("t", paste0("PC", 1:nharm))
+
+df0_long <- df0 %>%
+  pivot_longer(cols = starts_with("PC"),
+               names_to = "Componente",
+               values_to = "Valor")
+
+# --- clase 1 ---
+df1 <- data.frame(t = t_grid, eval_1)
+colnames(df1) <- c("t", paste0("PC", 1:nharm))
+
+df1_long <- df1 %>%
+  pivot_longer(cols = starts_with("PC"),
+               names_to = "Componente",
+               values_to = "Valor")
+
+# === 5. Graficar FPC para clase 0 ===
+plot_clase0 <- ggplot(df0_long, aes(x = t, y = Valor, color = Componente)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Funciones Principales - Clase 0",
+       x = "t", y = "Valor", color = "Componente") +
+  scale_color_brewer(palette = "Dark2")
+
+# === 6. Graficar FPC para clase 1 ===
+plot_clase1 <- ggplot(df1_long, aes(x = t, y = Valor, color = Componente)) +
+  geom_line(size = 1.2) +
+  theme_minimal() +
+  labs(title = "Funciones Principales - Clase 1",
+       x = "t", y = "Valor", color = "Componente") +
+  scale_color_brewer(palette = "Dark2")
+
+# Mostrar ambos
+plot_clase0
+plot_clase1
+
+
 
 ```
 

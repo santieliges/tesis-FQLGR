@@ -70,11 +70,11 @@ t <- tecator$absorp.fdata$argvals
 # 5) Crear base y operador diferencial
 nbasis=15
 freq_range <- range(t)  # rango de las longitudes de onda
-Lcoef <- c(0, (2*pi/diff(freq_range))^2, 0)
-harmacclLfd <- vec2Lfd(Lcoef, freq_range)
+#Lcoef <- c(0, (2*pi/diff(freq_range))^2, 0)
+#harmacclLfd <- vec2Lfd(Lcoef, freq_range)
 estimationBasis <- create.fourier.basis(rangeval = freq_range, nbasis = nbasis)
-fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLfd)
-
+#fdPar_obj <- fdPar(estimationBasis, Lfdobj = harmacclLfd)
+fdPar_obj <- fdPar(estimationBasis)
 # 6) Suavizado funcional
 fd_train <- smooth.basis(argvals = t, y = t(X_train), fdParobj = fdPar_obj)$fd
 fd_train_centered <- center.fd(fd_train)
@@ -88,6 +88,8 @@ fd_valid_centered <- center.fd(fd_valid)
 
 ## Modelo sobre base FPCA (Upsilon 0)
 
+
+
 ```{r}
       # =======================
       beta_init <- rnorm(nbasis, sd = 0.1)
@@ -100,14 +102,14 @@ modelo_fpca <- fpca_Upsilon0(
     beta = beta_init,
     gamma = gamma_init,
     alpha  = 0,
-    step_gradient = 0.0002,
+    step_gradient = 0.0037,
     iterations = 15000,
-    var_threshold = 0.9,
-    tol = 1e-8,
+    var_threshold = 0.7,
+    tol = 7.632765e-12	,
     basis = estimationBasis,
     LdPenalization = c(0),
-    lambda_lin = 1e-4	,
-    lambda_quad = 1e-5)
+    lambda_lin = 0	,
+    lambda_quad = 0)
 
 basis_fpca <- modelo_fpca$fpca_model
 eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
@@ -127,7 +129,7 @@ modelo_fpca_lin <- fpca_Upsilon0(
     var_threshold = 0.9,
     tol = 1e-8,
     basis = estimationBasis,
-    LdPenalization = harmacclLfd,
+    LdPenalization = c(0),
     lambda_lin = 1e-4	,
     lambda_quad = 1e-5,
     modelo_quad = FALSE
@@ -279,6 +281,18 @@ cat("AUROC base fpca lineal: ", round(auc_base_fpca_noquad, 4), "\n")
 # Abrir el dispositivo gráfico
 png("plots_tecator/curvas_roc_comparacion_modelos_tecator.png", width = 800, height = 600, res = 120)
 
+# --- Mejorar ejes ---
+par(
+  cex.axis = 1.3,      # tamaño números eje
+  col.axis = "black",  # color
+  font.axis = 2,       # <<< NÚMEROS DE LOS EJES EN NEGRITA
+  cex.lab = 1.4,       # tamaño etiquetas eje
+  col.lab = "black",
+  font.lab = 2,        # <<< ETIQUETAS "x" y "y" EN NEGRITA
+  lwd = 1.5            # ejes un poco más gruesos (opcional)
+)
+
+
 plot(roc_pca,    col = "darkgreen", lwd = 2, main = "Curvas ROC - Validacion", legacy.axes = TRUE)
 lines(roc_pca_noquad,    col = "lightgreen", lwd = 2, lty = 3)
 lines(roc_noPCA, col = "darkred",   lwd = 2, lty = 1)
@@ -298,12 +312,14 @@ legend("bottomright",
          paste0("(2) (AUC = ", round(auc_plsr, 4), ")"),
          paste0("(2) lineal (AUC = ", round(auc_plsr_noquad, 4), ")"),
          paste0("(3) (AUC = ", round(auc_plsr_2, 4), ")")
-                ),
-       col = c("darkred","purple", "violet", "darkgreen","lightgreen", "darkblue","skyblue","#007999"),
+       ),
+       col = c("darkred","purple", "violet", "darkgreen","lightgreen", 
+               "darkblue","skyblue","#007999"),
        lwd = 2,
        lty = c(1, 1, 2, 1 ,2, 1, 2, 1),
-       cex = 0.75,                    # reduce tamaño del texto
+       cex = 0.85,
        bty = "n")
+
 
 # Cerrar y guardar la imagen
 dev.off()
@@ -363,6 +379,18 @@ cat("AUC-PR base fpca lineal:    ", round(auc_pr_base_fpca_noquad, 4), "\n")
 #----- abro para la desscarga ----
 # Abrir el dispositivo gráfico
 png("plots_tecator/curvas_pr_comparacion_modelos_tecator.png", width = 800, height = 600, res = 120)
+
+
+par(
+  cex.axis = 1.3,      # tamaño números eje
+  col.axis = "black",  # color
+  font.axis = 2,       # <<< NÚMEROS DE LOS EJES EN NEGRITA
+  cex.lab = 1.4,       # tamaño etiquetas eje
+  col.lab = "black",
+  font.lab = 2,        # <<< ETIQUETAS "x" y "y" EN NEGRITA
+  lwd = 1.5            # ejes un poco más gruesos (opcional)
+)
+
 
 
 # --- Graficar todas las curvas PR ---
@@ -488,8 +516,8 @@ params_Upsilon0 <- list(
     step_gradient = 0.001,
     iterations = 15000,
     tol = 1e-10,
-    lambda_lin = 1e-4,
-    lambda_quad = 1e-5,
+    lambda_lin = 0,
+    lambda_quad = 0,
     var_threshold = 0.9,
     modelo_quad = TRUE
 )
@@ -502,6 +530,7 @@ params_Upsilon1 <- list(
     var_threshold = 0.9,
     modelo_quad = TRUE
 )
+
 resultados_y_distancias_tecator = evaluar_modelos_distintas_bases(
                                         data = list(X_train = X_train, 
                                                           X_valid = X_valid,
@@ -510,7 +539,7 @@ resultados_y_distancias_tecator = evaluar_modelos_distintas_bases(
                                       basises = basises,
                                       densidades_grillas = densidades,
                                       seed = 123,
-                                      Lcoef = c(3),
+                                      Lcoef = c(0, (2*pi/diff(freq_range))^2, 0),
                                       params_Upsilon0 = params_Upsilon0,
                                       params_Upsilon1 = params_Upsilon1)
 
@@ -588,6 +617,15 @@ carpeta <- "plots_tecator/comparacion modelos numero cond tecator"
 if (!dir.exists(carpeta)) {
   dir.create(carpeta)
 }
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16, face = "bold"),
+  legend.text  = element_text(size = 14, face = "bold")
+)
+
+
 # ---- PLOT 1 ----
 p1 <- ggplot(resultados_tecator, 
              aes(x = nbasis, y = AUC, 
@@ -600,7 +638,8 @@ p1 <- ggplot(resultados_tecator,
   scale_linetype_discrete() +
   theme_minimal() +
   labs(title = "Evolución de AUC según nbasis",
-       x = "nbasis", y = "AUC ROC")
+       x = "nbasis", y = "AUC ROC") +
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p1, width = 7, height = 5, dpi = 300)
@@ -618,7 +657,8 @@ p2 <- ggplot(resultados_tecator,
   scale_linetype_discrete() +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_psi",
-       x = "cond_psi", y = "AUC ROC")
+       x = "cond_psi", y = "AUC ROC")+
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_cond_psi.png"),
        plot = p2, width = 7, height = 5, dpi = 300)
@@ -636,7 +676,8 @@ p3 <- ggplot(resultados_tecator,
   scale_linetype_discrete() +
   theme_minimal() +
   labs(title = "Evolución de AUC según cond_var_fd",
-       x = "cond_var_fd", y = "AUC ROC")
+       x = "cond_var_fd", y = "AUC ROC")+
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_cond_var_fd.png"),
        plot = p3, width = 7, height = 5, dpi = 300)
@@ -654,7 +695,8 @@ p4 <- ggplot(resultados_tecator,
   scale_linetype_discrete() +
   theme_minimal() +
   labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "cond_psi")
+       x = "nbasis", y = "cond_psi")+
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
@@ -672,7 +714,8 @@ p5 <- ggplot(resultados_tecator,
   scale_linetype_discrete() +
   theme_minimal() +
   labs(title = "Evolución de cond_var_fd según nbasis",
-       x = "nbasis", y = "cond_var_fd")
+       x = "nbasis", y = "cond_var_fd")+
+  tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
        plot = p5, width = 7, height = 5, dpi = 300)
@@ -681,8 +724,7 @@ ggsave(filename = file.path(carpeta, "cond_var_fd_vs_nbasis.png"),
 dist_unicas <- distancias_tecator %>%
   mutate(par = paste0(pmin(modelo1, modelo2), " - ", pmax(modelo1, modelo2))) %>%
   filter(modelo1 != modelo2) %>%
-  distinct(nbasis, par, .keep_all = TRUE) 
-
+  distinct(nbasis, par, .keep_all = TRUE)
 
 dist_unicas <- dist_unicas %>%
   mutate(dist_total = dist_alpha + dist_beta + dist_gamma)
@@ -692,39 +734,60 @@ dist_largo <- dist_unicas %>%
                names_to = "tipo",
                values_to = "distancia")
 
+convert_to_plotmath <- function(expr_string) {
+  out <- try(parse(text = expr_string), silent = TRUE)
+  if(inherits(out, "try-error")) return(expr_string)
+  expr_string
+}
 
-# primero generamos el objeto dist_largo (ya lo tenés)
-# dist_largo tiene columnas: nbasis, par, tipo, distancia
+dist_largo2 <- dist_largo %>%
+  mutate(
+    expr1 = sapply(modelo1, convert_to_plotmath),
+    expr2 = sapply(modelo2, convert_to_plotmath),
+    par_expr = paste(expr1, "-", expr2)
+  )
 
-tipos <- unique(dist_largo$tipo)
+tipos <- unique(dist_largo2$tipo)
+label_map <- c(
+  dist_alpha = "Delta * alpha",
+  dist_beta  = "Delta * beta",
+  dist_gamma = "Delta * gamma",
+  dist_total = "Delta * total"
+)
 
 for(t in tipos){
-  
-  p <- dist_largo %>%
+
+  title_expr <- substitute(
+    paste("Evolución de ", LBL, " según nbasis"),
+    list(LBL = parse(text = label_map[[t]])[[1]])
+  )
+
+  p <- dist_largo2 %>%
     filter(tipo == t) %>%
     ggplot(aes(x = nbasis, y = distancia,
-               color = par, linetype = par)) +
+               color = par_expr, linetype = par_expr)) +
     geom_line(size = 1.2) +
     geom_point(size = 2) +
-    scale_color_discrete(labels = function(x) parse(text = x)) +
-    guides(linetype = guide_none()) +
     theme_minimal() +
     labs(
-      title = paste("Evolución de", t, "según nbasis"),
+      title = title_expr,
       x = "nbasis",
-      y = t,
+      y = NULL,
       color = "Comparación"
-    )
+    ) +
+    scale_color_discrete(labels = scales::label_parse()) +
+    guides(linetype = guide_none()) +
+    ylab(parse(text = label_map[[t]]))+
+  tema_negrita
   
   ggsave(
     filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
     plot = p,
-    width = 7,
-    height = 5,
-    dpi = 300
+    width = 7, height = 5, dpi = 300
   )
-  
 }
+
+
 ```
 
 ```{r}

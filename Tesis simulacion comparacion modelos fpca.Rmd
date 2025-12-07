@@ -1004,6 +1004,7 @@ distancias_modelos_simulados_K_fijo <- function(n = 3000,
 
 
 ```{r}
+library(dplyr)
 resultados_y_distancias_bspline = evaluar_modelos_simulados(3000, c(10,15,30,40,50,60,70,80,90,100), t = seq(-1, 1, length.out = 201), seed = 123, Lcoef = c(3)
 )
 resultados_bspline <- resultados_y_distancias_bspline$resultados
@@ -1024,11 +1025,12 @@ distancias_bspline_chol <- distancias_modelos_simulados_K_fijo(1000, c(10,15,30,
 
 ```{r}
 library(dplyr)
+library(ggtext)
 
 resultados_bspline <- resultados_bspline %>%
   mutate(
     modelo = case_when(
-      modelo == "fpca" ~ "Upsilon^{(0)}",
+      modelo == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
       modelo == "fpca_Upsilon0_equivalencia" ~ "Upsilon[Equivalente]^{(0)}",
       modelo == "pca_Upsilon1" ~ "Upsilon^{(1)}",
       TRUE ~ modelo
@@ -1038,7 +1040,7 @@ resultados_bspline <- resultados_bspline %>%
 distancias_bspline <- distancias_bspline %>%
   mutate(
     modelo1 = case_when(
-      modelo1 == "fpca" ~ "Upsilon^{(0)}",
+      modelo1 == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
       modelo1 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
       modelo1 == "pca_quad" ~ "Upsilon^{(1)}",
       TRUE ~ modelo1
@@ -1047,7 +1049,7 @@ distancias_bspline <- distancias_bspline %>%
 distancias_bspline <- distancias_bspline %>%
   mutate(
     modelo2 = case_when(
-      modelo2 == "fpca" ~ "Upsilon^{(0)}",
+      modelo2 == "fpca_Upsilon0" ~ "Upsilon^{(0)}",
       modelo2 == "equiv" ~ "Upsilon[Equivalente]^{(0)}",
       modelo2 == "pca_quad" ~ "Upsilon^{(1)}",
       TRUE ~ modelo2
@@ -1096,13 +1098,19 @@ load("resultados_condgram_simulacion_bspline_chol.RData")
 
 ```{r}
 library(ggplot2)
-
+library(dplyr)
 # 1. Crear carpeta si no existe
 carpeta <- "plots/comparacion modelos numero cond bspline"
 if (!dir.exists(carpeta)) {
   dir.create(carpeta)
 }
-
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16),
+  legend.text  = element_text(size = 15)
+)
 resultados_bspline$base <- "bspline"
 
 
@@ -1115,7 +1123,7 @@ p1 <- ggplot(resultados_bspline, aes(x = nbasis, y = AUC, color = modelo ,linety
     title = expression("Evolución de AUC según nbasis"),
     x = "nbasis",
     y = "AUC ROC"
-  )
+  ) + tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p1, width = 7, height = 5, dpi = 300)
@@ -1147,7 +1155,7 @@ for (escenario_actual in escenarios_unicos) {
       x = expression(kappa(Psi)),
       y = "AUC ROC",
       color = "Modelo"
-    )
+    )  + tema_negrita
   
   # 3. Guardar el plot con un nombre de archivo específico para el escenario
   # Se reemplaza ' ' y otros caracteres especiales en el nombre del escenario para el archivo
@@ -1166,14 +1174,13 @@ p4 <- ggplot(resultados_bspline, aes(x = nbasis, y = cond_psi, color = modelo ,l
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "kappa(Psi)")
+       x = "nbasis", y = "kappa(Psi)") + tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
 
 # ---- PLOT 5 ----
-library(ggplot2)
-library(dplyr)
+
 
 # Obtener los nombres únicos de los escenarios
 escenarios_unicos <- unique(resultados_bspline$escenario)
@@ -1198,7 +1205,7 @@ for (escenario_actual in escenarios_unicos) {
       x = expression(kappa(Psi)),
       y = "AUC ROC",
       color = "Modelo"
-    )
+    ) + tema_negrita
   
   # 3. Guardar el plot con un nombre de archivo específico para el escenario
   nombre_archivo <- paste0("msevskappa(psi)_", escenario_actual, ".png")
@@ -1218,7 +1225,7 @@ p6 <- ggplot(resultados_bspline, aes(x = nbasis, y = mse, color = modelo ,linety
     title = expression("Evolución de MSE según nbasis"),
     x =  "nbasis",
     y = "mse"
-  )
+  ) + tema_negrita
 
 ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
        plot = p6, width = 7, height = 5, dpi = 300)
@@ -1239,43 +1246,73 @@ dist_largo <- dist_unicas %>%
                names_to = "tipo",
                values_to = "distancia")
 
+convert_to_plotmath <- function(expr_string) {
+  out <- try(parse(text = expr_string), silent = TRUE)
+  if(inherits(out, "try-error")) return(expr_string)
+  expr_string
+}
 
-tipos <- unique(dist_largo$tipo)
+dist_largo2 <- dist_largo %>%
+  mutate(
+    expr1 = sapply(modelo1, convert_to_plotmath),
+    expr2 = sapply(modelo2, convert_to_plotmath),
+    par_expr = paste(expr1, "-", expr2)
+  )
+
+tipos <- unique(dist_largo2$tipo)
+label_map <- c(
+  dist_alpha = "Delta * alpha",
+  dist_beta  = "Delta * beta",
+  dist_gamma = "Delta * gamma",
+  dist_total = "Delta * total"
+)
 
 for(t in tipos){
-  
-  p <- dist_largo %>%
+
+  title_expr <- substitute(
+    paste("Evolución de ", LBL, " según nbasis"),
+    list(LBL = parse(text = label_map[[t]])[[1]])
+  )
+
+  p <- dist_largo2 %>%
     filter(tipo == t) %>%
     ggplot(aes(x = nbasis, y = distancia,
-               color = par, linetype = par)) +
+               color = par_expr, linetype = par_expr)) +
     geom_line(size = 1.2) +
     geom_point(size = 2) +
-    scale_color_discrete(labels = function(x) parse(text = x)) +
-    guides(linetype = guide_none()) +
     theme_minimal() +
     labs(
-      title = paste("Evolución de", t, "según nbasis"),
+      title = title_expr,
       x = "nbasis",
-      y = t,
+      y = NULL,
       color = "Comparación"
-    )
+    ) +
+    scale_color_discrete(labels = scales::label_parse()) +
+    guides(linetype = guide_none()) +
+    ylab(parse(text = label_map[[t]])) + tema_negrita
   
   ggsave(
     filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
     plot = p,
-    width = 7,
-    height = 5,
-    dpi = 300
+    width = 7, height = 5, dpi = 300
   )
-  
 }
+
 
 
 ```
 
 ```{r}
 library(ggplot2)
-
+library(tidyr)
+library(dplyr)
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16),
+  legend.text  = element_text(size = 15)
+)
 # 1. Crear carpeta si no existe
 carpeta <- "plots/comparacion modelos numero cond bspline cholesky"
 if (!dir.exists(carpeta)) {
@@ -1294,15 +1331,12 @@ p1 <- ggplot(resultados_bspline_chol, aes(x = nbasis, y = AUC, color = modelo ,l
     title = expression("Evolución de AUC según nbasis"),
     x = "nbasis",
     y = "AUC ROC"
-  )
+  ) + tema_negrita
 
 ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p1, width = 7, height = 5, dpi = 300)
 
 # ---- PLOT 2 ----
-library(ggplot2)
-library(dplyr)
-
 # Obtener los nombres únicos de los escenarios
 escenarios_unicos <- unique(resultados_bspline_chol$escenario)
 
@@ -1326,7 +1360,7 @@ for (escenario_actual in escenarios_unicos) {
       x = expression(kappa(Psi)),
       y = "AUC ROC",
       color = "Modelo"
-    )
+    ) + tema_negrita
   
   # 3. Guardar el plot con un nombre de archivo específico para el escenario
   # Se reemplaza ' ' y otros caracteres especiales en el nombre del escenario para el archivo
@@ -1345,7 +1379,7 @@ p4 <- ggplot(resultados_bspline_chol, aes(x = nbasis, y = cond_psi, color = mode
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de cond_psi según nbasis",
-       x = "nbasis", y = "kappa(Psi)")
+       x = "nbasis", y = "kappa(Psi)") + tema_negrita
 
 ggsave(filename = file.path(carpeta, "cond_psi_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
@@ -1373,7 +1407,7 @@ for (escenario_actual in escenarios_unicos) {
       x = expression(kappa(Psi)),
       y = "AUC ROC",
       color = "Modelo"
-    )
+    ) + tema_negrita
   
   # 3. Guardar el plot con un nombre de archivo específico para el escenario
   nombre_archivo <- paste0("msevskappa(psi)_", escenario_actual, ".png")
@@ -1394,7 +1428,7 @@ p6 <- ggplot(resultados_bspline_chol, aes(x = nbasis, y = mse, color = modelo ,l
     x =  "nbasis",
     y = "mse"
   ) +
-  coord_cartesian(ylim = c(0, 3000))   # <-- por ejemplo
+  coord_cartesian(ylim = c(0, 3000)) + tema_negrita   # <-- por ejemplo
 
 ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
        plot = p6, width = 7, height = 5, dpi = 300)
@@ -1414,36 +1448,59 @@ dist_largo <- dist_unicas %>%
                names_to = "tipo",
                values_to = "distancia")
 
+convert_to_plotmath <- function(expr_string) {
+  out <- try(parse(text = expr_string), silent = TRUE)
+  if(inherits(out, "try-error")) return(expr_string)
+  expr_string
+}
 
-tipos <- unique(dist_largo$tipo)
+dist_largo2 <- dist_largo %>%
+  mutate(
+    expr1 = sapply(modelo1, convert_to_plotmath),
+    expr2 = sapply(modelo2, convert_to_plotmath),
+    par_expr = paste(expr1, "-", expr2)
+  )
+
+tipos <- unique(dist_largo2$tipo)
+label_map <- c(
+  dist_alpha = "Delta * alpha",
+  dist_beta  = "Delta * beta",
+  dist_gamma = "Delta * gamma",
+  dist_total = "Delta * total"
+)
 
 for(t in tipos){
-  
-  p <- dist_largo %>%
+
+  title_expr <- substitute(
+    paste("Evolución de ", LBL, " según nbasis"),
+    list(LBL = parse(text = label_map[[t]])[[1]])
+  )
+
+  p <- dist_largo2 %>%
     filter(tipo == t) %>%
     ggplot(aes(x = nbasis, y = distancia,
-               color = par, linetype = par)) +
+               color = par_expr, linetype = par_expr)) +
     geom_line(size = 1.2) +
     geom_point(size = 2) +
-    scale_color_discrete(labels = function(x) parse(text = x)) +
-    guides(linetype = guide_none()) +
     theme_minimal() +
     labs(
-      title = paste("Evolución de", t, "según nbasis"),
+      title = title_expr,
       x = "nbasis",
-      y = t,
+      y = NULL,
       color = "Comparación"
-    )
+    ) +
+    scale_color_discrete(labels = scales::label_parse()) +
+    guides(linetype = guide_none()) +
+    ylab(parse(text = label_map[[t]])) + tema_negrita
   
   ggsave(
     filename = file.path(carpeta, paste0("dist_", t, "_por_nbasis.png")),
     plot = p,
-    width = 7,
-    height = 5,
-    dpi = 300
+    width = 7, height = 5, dpi = 300
   )
-  
 }
+
+
 
 
 ```
@@ -1494,7 +1551,13 @@ if (!dir.exists(carpeta)) {
   dir.create(carpeta)
 }
 
-
+tema_negrita <- theme(
+  axis.title   = element_text(size = 16, face = "bold"),
+  axis.text    = element_text(size = 14, face = "bold"),
+  plot.title   = element_text(size = 18, face = "bold"),
+  legend.title = element_text(size = 16),
+  legend.text  = element_text(size = 15)
+)
 # ---- PLOT 4 ----
 p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = AUC, color = modelo ,linetype = modelo)) +
   geom_line(size = 1.2) +
@@ -1502,7 +1565,9 @@ p4 <- ggplot(resultados_fourier, aes(x = nbasis, y = AUC, color = modelo ,linety
   scale_color_discrete(labels = function(x) parse(text = x)) +
   theme_minimal() +
   labs(title = "Evolución de AUC ROC según nbasis",
-       x = "nbasis", y = "AUC ROC")
+       x = "nbasis", y = "AUC ROC")  +
+  tema_negrita +
+  guides(linetype = "none")
 
 ggsave(filename = file.path(carpeta, "AUC_vs_nbasis.png"),
        plot = p4, width = 7, height = 5, dpi = 300)
@@ -1516,7 +1581,10 @@ p6 <- ggplot(resultados_fourier, aes(x = nbasis, y = mse, color = modelo ,linety
     title = expression("Evolución de MSE según nbasis"),
     x =  "nbasis",
     y = "mse"
-  ) 
+  )  + 
+  tema_negrita +
+  guides(linetype = "none")
+
 
 ggsave(filename = file.path(carpeta, "nbasis_vs_mse.png"),
        plot = p6, width = 7, height = 5, dpi = 300)
