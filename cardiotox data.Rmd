@@ -81,10 +81,12 @@ fdPar_obj <- fdPar(estimationBasis, harmacclLfd)
 
 # 6) Suavizado funcional
 fd_train <- smooth.basis(argvals = t, y = t(X_train), fdParobj = fdPar_obj)$fd
-fd_train_centered <- center.fd(fd_train)
+#fd_train_centered <- center.fd(fd_train)
+fd_train_centered <- fd_train
 
 fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdParobj = fdPar_obj)$fd
 fd_valid_centered <- center.fd(fd_valid)
+fd_valid_centered <- fd_valid
 
 
 ```

@@ -78,10 +78,10 @@ estimationBasis <- create.fourier.basis(rangeval = freq_range, nbasis = nbasis)
 fdPar_obj <- fdPar(estimationBasis)
 # 6) Suavizado funcional
 fd_train <- smooth.basis(argvals = t, y = t(X_train), fdParobj = fdPar_obj)$fd
-fd_train_centered <- center.fd(fd_train)
+#fd_train_centered <- center.fd(fd_train)
 
 fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdParobj = fdPar_obj)$fd
-fd_valid_centered <- center.fd(fd_valid)
+#fd_valid_centered <- center.fd(fd_valid)
 
 ```
 
@@ -95,7 +95,7 @@ library(tidyr)
 # Evalúo las curvas centradas
 t_grid <- t  # podés usar algo más fino p.ej. seq(min(t), max(t), length=300)
 
-eval_train <- eval.fd(t_grid, fd_train_centered)  # matriz: length(t_grid) x n_train
+eval_train <- eval.fd(t_grid, fd_train)  # matriz: length(t_grid) x n_train
 
 # Convertir a data frame largo
 df_train_plot <- as.data.frame(eval_train)
@@ -139,8 +139,8 @@ library(tidyr)
 library(patchwork)  # opcional para combinar plots
 
 # --- Separar los FD por clase ---
-fd_train_class0 <- fd_train_centered[y_train == 0]
-fd_train_class1 <- fd_train_centered[y_train == 1]
+fd_train_class0 <- fd_train[y_train == 0]
+fd_train_class1 <- fd_train[y_train == 1]
 
 # --- FPCA por clase ---
 pca0 <- pca.fd(fd_train_class0, nharm = 3)
@@ -226,7 +226,7 @@ ggplot(data.frame(Fat = fat), aes(x = Fat)) +
       
 
 modelo_fpca <- fpca_Upsilon0(
-    fd_centered= fd_train_centered,
+    fd_centered= fd_train,
     y= y_train,
     beta = beta_init,
     gamma = gamma_init,
@@ -273,7 +273,7 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,
+res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train,
                                   y = y_train, 
                                   beta = beta_init, 
                                   gamma = gamma_init,
@@ -286,7 +286,7 @@ res_pca_quad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,
                                   lambda_lin = 0.01, 
                                   lambda_quad = 0.001)
 
-res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train_centered,
+res_pca_noquad <- pca_coef_Upsilon1(fd_centered = fd_train,
                                     y = y_train, 
                                     beta = beta_init,
                                     gamma = gamma_init,
@@ -308,7 +308,7 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,
+res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train,
                                 y = y_train,
                                 beta = beta_init,
                                 gamma = gamma_init,
@@ -322,7 +322,7 @@ res_plsr_quad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,
                                 nt = 4, 
                                 scale = TRUE)
 
-res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,
+res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train,
                                   y = y_train, 
                                   beta = beta_init,
                                   gamma = gamma_init,
@@ -342,7 +342,7 @@ res_plsr_noquad <- PLSR_Upsilon_2(fd_centered = fd_train_centered,
 ## FPLSR sobre interacciones cuad. (Upsilon 3)
 ```{r}
 res_plsr_2<- FPLSR_Upsilon3(
-    fd_centered=fd_train_centered,
+    fd_centered=fd_train,
     y= y_train,
     alpha  = 0,
     step_gradient = 0.1,
@@ -368,7 +368,7 @@ beta_init <- rnorm(nbasis, sd = 0.1)
 gamma_init <- gamma_init <- matrix(rnorm(nbasis^2, sd = 0.1), nrow = nbasis)
 alpha_init <- 0
 
-res_noPCA <- Upsilon_naive(fd_centered = fd_train_centered, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, step_gradient = 0.001, iterations = 3000, basis = estimationBasis,  LdPenalization = harmacclLfd, lambda_lin = 1, lambda_quad = 0)
+res_noPCA <- Upsilon_naive(fd_centered = fd_train, y = y_train, beta = beta_init, gamma = gamma_init, alpha = alpha_init, step_gradient = 0.001, iterations = 3000, basis = estimationBasis,  LdPenalization = harmacclLfd, lambda_lin = 1, lambda_quad = 0)
 ```
 
 
@@ -417,14 +417,14 @@ predecir_probabilidades_validacion_en_base_fpca <- function(res, fd_valid_center
 
 
 # Probabilidades de validación
-y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca_quad, fd_valid_centered, estimationBasis, modo = "PCA")
-y_prob_valid_pca_noquad    <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid_centered, estimationBasis, modo = "PCA")
-y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid_centered, estimationBasis, modo = "NoPCA")
-y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid_centered, estimationBasis, modo = "PLSR")
-y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid_centered, estimationBasis, modo = "PLSR")
-y_prob_valid_plsr_noquad   <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid_centered, estimationBasis, modo = "PLSR")
-y_prob_valid_base_fpca    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
-y_prob_valid_base_fpca_noquad    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid_centered, modelo_fpca_lin$fpca_model$harmonics)
+y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca_quad, fd_valid, estimationBasis, modo = "PCA")
+y_prob_valid_pca_noquad    <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid, estimationBasis, modo = "PCA")
+y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid, estimationBasis, modo = "NoPCA")
+y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_noquad   <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid, estimationBasis, modo = "PLSR")
+y_prob_valid_base_fpca    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad    <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid, modelo_fpca_lin$fpca_model$harmonics)
 
 roc_pca    <- roc(response = y_valid, predictor = y_prob_valid_pca)
 roc_pca_noquad    <- roc(response = y_valid, predictor = y_prob_valid_pca_noquad)
@@ -507,14 +507,14 @@ library(PRROC)
 
 
 # --- Calcular probabilidades de validación ---
-y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca_quad, fd_valid_centered, estimationBasis, modo = "PCA")
-y_prob_valid_pca_noquad <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid_centered, estimationBasis, modo = "PCA")
-y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid_centered, estimationBasis, modo = "NoPCA")
-y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid_centered, estimationBasis, modo = "PLSR")
-y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid_centered, estimationBasis, modo = "PLSR")
-y_prob_valid_plsr_noquad <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid_centered, estimationBasis, modo = "PLSR")
-y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
-y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid_centered, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_pca    <- predecir_probabilidades_validacion(res_pca_quad, fd_valid, estimationBasis, modo = "PCA")
+y_prob_valid_pca_noquad <- predecir_probabilidades_validacion(res_pca_noquad, fd_valid, estimationBasis, modo = "PCA")
+y_prob_valid_NoPCA  <- predecir_probabilidades_validacion(res_noPCA, fd_valid, estimationBasis, modo = "NoPCA")
+y_prob_valid_plsr   <- predecir_probabilidades_validacion(res_plsr_quad, fd_valid, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_2   <- predecir_probabilidades_validacion(res_plsr_2, fd_valid, estimationBasis, modo = "PLSR")
+y_prob_valid_plsr_noquad <- predecir_probabilidades_validacion(res_plsr_noquad, fd_valid, estimationBasis, modo = "PLSR")
+y_prob_valid_base_fpca <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca, fd_valid, modelo_fpca$fpca_model$harmonics)
+y_prob_valid_base_fpca_noquad <- predecir_probabilidades_validacion_en_base_fpca(modelo_fpca_lin, fd_valid, modelo_fpca$fpca_model$harmonics)
 
 # --- Calcular curvas PR (Precision-Recall) ---
 # PRROC espera que las etiquetas positivas sean 1 y las negativas 0
@@ -606,7 +606,7 @@ dev.off()
 ```{r}
 
 
-basis = fd_train_centered$basis
+basis = fd_train$basis
 evalbasis <- eval.basis(t, basis)
 basis_fpca <- pca.fd(fdobj = fd_train, nharm = modelo_fpca$K, centerfns = TRUE)
 eval_fd_basis <- eval.fd(evalarg = t, fdobj= basis_fpca$harmonics)
