@@ -127,7 +127,74 @@ ggplot(df_train_plot, aes(x = argvals, y = value, group = curve, color = factor(
     plot.title   = element_text(face = "bold", size = 16)
   )
 
+print(sum(y_valid)/length(y_valid))
+print(sum(y_train)/length(y_train))
 ```
+
+```{r}
+library(fda)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)  # opcional para combinar plots
+
+# --- Separar los FD por clase ---
+fd_train_class0 <- fd_train_centered[y_train == 0]
+fd_train_class1 <- fd_train_centered[y_train == 1]
+
+# --- FPCA por clase ---
+pca0 <- pca.fd(fd_train_class0, nharm = 3)
+pca1 <- pca.fd(fd_train_class1, nharm = 3)
+
+# --- Evaluar los autovectores (harmonics) ---
+harm0 <- eval.fd(t_grid, pca0$harmonics)  # dim: length(t) x nharm
+harm1 <- eval.fd(t_grid, pca1$harmonics)
+
+# --- Pasar a data frame largo para ggplot ---
+df0 <- as.data.frame(harm0)
+df0$argvals <- t_grid
+df0$class <- "Clase 0"
+
+df0 <- df0 %>%
+  pivot_longer(cols = starts_with("PC"), 
+               names_to = "PC", 
+               values_to = "value")
+
+df1 <- as.data.frame(harm1)
+df1$argvals <- t_grid
+df1$class <- "Clase 1"
+
+df1 <- df1 %>%
+  pivot_longer(cols = starts_with("PC"), 
+               names_to = "PC", 
+               values_to = "value")
+
+df_pc <- rbind(df0, df1)
+
+# --- Plot ---
+p_fpca <- ggplot(df_pc, aes(x = argvals, y = value, color = PC)) +
+  geom_line(linewidth = 1.2) +
+  facet_wrap(~ class, ncol = 1, scales = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Componentes principales funcionales por clase",
+    x = "Longitud de onda",
+    y = "Autovector funcional (harmonic)"
+  ) +
+  scale_color_brewer(palette = "Dark2") +
+  theme(
+    text = element_text(size = 14),
+    strip.text = element_text(size = 15, face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.text  = element_text(face = "bold"),
+    axis.title   = element_text(face = "bold"),
+    plot.title   = element_text(face = "bold", size = 18)
+  )
+
+p_fpca
+
+```
+
 
 ```{r}
 library(ggplot2)
