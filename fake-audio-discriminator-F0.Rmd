@@ -288,13 +288,13 @@ Y_train <- as.numeric(df_F0_training_completo$clase)
 X_train <- df_F0_training_completo %>% select(-clase)
 fd_train <- smooth.basis(argvals = t, y = t(X_train), fdPar_obj)$fd
 fd_train_centered <- center.fd(fd_train)
-
+#fd_train_centered <-fd_train
 # Test
 Y_valid <- as.numeric(df_F0_testing_completo$clase)
 X_valid <- df_F0_testing_completo %>% select(-clase)
 fd_valid <- smooth.basis(argvals = t, y = t(X_valid), fdPar_obj)$fd
-fd_valid_centered <- center.fd(fd_valid)
-
+fd_valid_centered <- fd_valid
+fd_valid_centered$coefs <- fd_valid$coefs -  rowMeans(fd_train$coefs)
 ```
 
 
