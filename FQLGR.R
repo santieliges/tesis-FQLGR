@@ -2202,4 +2202,127 @@ FPLSR_Upsilon3 <- function(fd_centered, y, modelo_quad = TRUE,
 }
 
 
+##grid search cv ups3 
 
+library(pROC)
+random_search_cv_FPLSR_significance <- function(
+    fd_centered, y, 
+    basis, LdPenalization,
+    modelo_quad = TRUE,
+    
+    # Nuevos candidatos
+    nivel_significancia_lin_candidates,
+    nivel_significancia_quad_candidates,
+    size_step_candidates,
+    
+    # Fijos (pueden ser tuneables en otra capa)
+    nt_lin = length(basis$nbasis),
+    nt_quad = length(basis$nbasis)*(length(basis$nbasis)+1)/2,
+    lambda_lin = 1e-12,
+    lambda_quad = 1e-12,
+    
+    # Random search / CV
+    n_iter = 20,
+    K = 5,
+    seed = 123,
+    verbose = TRUE
+){
+  set.seed(seed)
+  n <- length(y)
+  
+  #===== Generar combinaciones random =====#
+  combos <- data.frame(
+    nivel_lin  = sample(nivel_significancia_lin_candidates,  n_iter, replace = TRUE),
+    nivel_quad = sample(nivel_significancia_quad_candidates, n_iter, replace = TRUE),
+    size_step  = sample(size_step_candidates, n_iter, replace = TRUE)
+  )
+  
+  # resultado final
+  results <- data.frame()
+  
+  #===== Particionar folds =====#
+  folds <- sample(rep(1:K, length.out = n), replace =  TRUE)
+  
+  #===== Loop principal =====#
+  for(i in 1:nrow(combos)){
+    
+    nivel_lin_i  <- combos$nivel_lin[i]
+    nivel_quad_i <- combos$nivel_quad[i]
+    size_step_i  <- combos$size_step[i]
+    
+    if(verbose){
+      cat("\n### Evaluando combinación", i, "de", nrow(combos), "###\n")
+      cat("nivel_significancia_lin =", nivel_lin_i, 
+          "| nivel_significancia_quad =", nivel_quad_i,
+          "| size_step =", size_step_i, "\n")
+    }
+    
+    auc_folds <- c()
+    
+    #====== CROSS VALIDATION ======#
+    for(k in 1:K){
+      test_idx  <- which(folds == k)
+      train_idx <- setdiff(1:n, test_idx)
+      
+      fd_train <- fd(coef = fd_centered$coefs[, train_idx, drop = FALSE],
+                     basis = basis)
+      fd_test  <- fd(coef = fd_centered$coefs[, test_idx, drop = FALSE],
+                     basis = basis)
+      
+      y_train <- y[train_idx]
+      y_test  <- y[test_idx]
+      
+      #---- Ajustar el modelo con esta combinación ----#
+      modelo_fit <- FPLSR_Upsilon3(
+        fd_centered = fd_train,
+        y = y_train,
+        modelo_quad = modelo_quad,
+        basis = basis,
+        LdPenalization = LdPenalization,
+        nt_lin = nt_lin,
+        nt_quad = nt_quad,
+        batch_size = 15,
+        step_gradient = size_step_i,
+        lambda_lin = lambda_lin,
+        lambda_quad = lambda_quad,
+        nivel_significancia_lin = nivel_lin_i,
+        nivel_significancia_quad = nivel_quad_i,
+        verbose = FALSE
+      )
+      
+      #===== Predicción de probabilidades =====#
+      y_prob_valid <- predecir_probabilidades_validacion(
+        modelo_fit,
+        fd_test,
+        estimationBasis = basis,
+        modo = "PLSR"
+      )
+      
+      #===== Cálculo AUC–PR =====#
+      pr_obj   <- get_pr(y_test, y_prob_valid)
+      auc_pr_k <- pr_obj$auc.integral
+      
+      auc_folds[k] <- auc_pr_k
+    }
+    
+    mean_auc <- mean(auc_folds)
+    
+    results <- rbind(
+      results,
+      data.frame(
+        nivel_significancia_lin  = nivel_lin_i,
+        nivel_significancia_quad = nivel_quad_i,
+        size_step = size_step_i,
+        mean_auc = mean_auc
+      )
+    )
+  }
+  
+  #===== Ordenar por AUC =====#
+  results <- results[order(-results$mean_auc), ]
+  
+  return(list(
+    results = results,
+    best_params = results[1, ]
+  ))
+}

@@ -177,18 +177,18 @@ res_plsr_2<- FPLSR_Upsilon3(
     fd_centered=fd_train_centered,
     y= as.numeric(as.character(y_train)),
     alpha  = 0,
-    step_gradient = 3,
-    iterations = 20000,
-    tol = 1e-9,
+    step_gradient = 0.1,
+    iterations = 10000,
+    tol = 1e-8,
     basis = estimationBasis,
     LdPenalization = vec2Lfd(Lcoef, c(-0.005,1.005)),
     lambda_lin = 0,
-    lambda_quad = 0,
+    lambda_quad = 1e-2,
     nt_lin = 15,
     nt_quad = 80,
     nivel_significancia_lin = 1, 
-    nivel_significancia_quad = 0.2, 
-    scale = FALSE)
+    nivel_significancia_quad = 0.1, 
+    scale = TRUE)
 
 ```
 
